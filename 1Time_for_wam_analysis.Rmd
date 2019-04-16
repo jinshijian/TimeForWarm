@@ -1,0 +1,250 @@
+---
+title: "1Time_for_warm_analysis.rmd"
+output: html_document
+---
+
+```{r preliminaries, message=FALSE, include=FALSE, echo=FALSE}
+# Set chunks defaults; these options will be applied to all subsequent chunks
+knitr::opts_chunk$set(results = 'hide', message = TRUE, include = TRUE, echo = FALSE,
+                      fig.height = 4.5, fig.width = 8)
+
+# Constants
+OUTPUT_DIR		<- "outputs/"
+LOG_DIR			<- "logs/"
+SEPARATOR		<- "-------------------------------------------"
+INFN 			<- "srdbv4/srdbv4.csv"
+OUTFN 			<- "srdbv4_final.csv"
+DATA_DIR <- 'other_data'
+Global_PT_Del <- 'GlobalTempPrecipTimeSeries_Del.csv'
+MGRsD_ALLData <- 'MGRsDAllData.csv'
+
+
+# Create output and log folders if they do not exist
+if(!file.exists(OUTPUT_DIR)) dir.create(OUTPUT_DIR)
+if(!file.exists(LOG_DIR)) dir.create( LOG_DIR )
+
+# install.packages('cowplot')
+# Load required packages
+library(cowplot)
+library(data.table)
+library(dplyr)
+library(ggplot2)
+theme_set(theme_bw())
+library(lubridate)
+library(kableExtra)
+library(cowplot)
+library(knitr)
+library("ggpubr")
+library(reshape)
+
+# Source all needed functions
+source('functions.R')
+```
+
+
+
+```{r}
+# input data
+srdb_v4 <- read.csv(INFN, stringsAsFactors=F)
+PT_Del <- read.csv(paste0(DATA_DIR,'/', Global_PT_Del), header = T)
+MGRsD <- read.csv(paste0(DATA_DIR, '/', MGRsD_ALLData), header = T)
+MGRsD_obs_6 <- read.csv(paste0(DATA_DIR, '/', 'MGRsDObsLargerThan6_V3.CSV'), header = T)
+```
+
+* We compared mean annual air temperature bwtween 1964 and 2000 (1990s) vs. mean air temperature between 2001 and 2017 (2000s)
+* Air temperature of 1990s (1964-2000) are about 0.5 C lower than that from 2000s(2001-2017)
+* In boreal and polar regions, the temperature difference is bigger (difference ~~ 1 C)
+* Therefore, 1990s are treated as control, 2000s are treated as warming period
+
+```{r}
+# temperature of 1990s vs 2010s
+ggplot(PT_Del, aes(Decades,  Tm)) +   
+  geom_boxplot()+
+  facet_wrap(~MiddleClimate, nrow = 2,scales = "free")+ 
+  labs(y=expression("Air temperature "*"("*degree~C*")"))
+```
+
+* Using Rs data from MGRsD, we analyzed Rs vs. temperature in different biome for 1990s and 2000s
+* How Rs response to temperature change does not shift in 2000s comparing to 1990s in most biome
+
+```{r, fig.height=8, fig.width=8}
+# use ggplot
+p <- ggplot (MGRsD, aes(Tm, RsLog, colour = Decades))
+p <- p + geom_point(alpha = 0.2, size = 1) + geom_smooth(method = 'lm') +
+  facet_wrap(~MiddleClimate, ncol = 2) + 
+  labs( y = expression(ln(Rs)~(g~C~m^{-2}~d^{-1} ))
+       ,x = expression(Air~temperature~(degree~C) ) ) +
+  theme(legend.position = 'top')
+p
+```
+
+* We selected sites from MGRsD with more than 7 months' Rs measurements
+* For each sites, we simulate the ewlationshio between Rs and Tm (air temperature) with Rs=axexp^bxTm
+* According to parameter b, we can calculate Q10=exp(b+Tm+10) / exp(b+Tm)
+
+
+```{r}
+# Data processing before Q10 calculation
+MGRsD_obs_6[MGRsD_obs_6$studynumber == 1971 & MGRsD_obs_6$Measure_Year==1998 , 'Measure_Year'] <- 1999
+MGRsD_obs_6[MGRsD_obs_6$studynumber == 3619 & MGRsD_obs_6$Measure_Year==2000 , 'Measure_Year'] <- 2001
+MGRsD_obs_6[MGRsD_obs_6$studynumber == 4234 & MGRsD_obs_6$Measure_Year==1998 , 'Measure_Year'] <- 1999
+MGRsD_obs_6[MGRsD_obs_6$studynumber == 4234 & MGRsD_obs_6$Measure_Year==2005 , 'Measure_Year'] <- 2003
+MGRsD_obs_6[MGRsD_obs_6$studynumber == 4234 & MGRsD_obs_6$Measure_Year==2004 , 'Measure_Year'] <- 2003
+MGRsD_obs_6[MGRsD_obs_6$studynumber == 4234 & MGRsD_obs_6$Measure_Year==2001 , 'Measure_Year'] <- 2003
+MGRsD_obs_6[MGRsD_obs_6$studynumber == 4015 , 'Measure_Year'] <- 2002
+MGRsD_obs_6[MGRsD_obs_6$studynumber == 4270 & MGRsD_obs_6$Measure_Year==1998 , 'Measure_Year'] <- 1999
+MGRsD_obs_6[MGRsD_obs_6$studynumber == 4270 & MGRsD_obs_6$Measure_Year==2001 , 'Measure_Year'] <- 2002
+MGRsD_obs_6[MGRsD_obs_6$studynumber == 4270 & MGRsD_obs_6$Measure_Year==2004 , 'Measure_Year'] <- 2003
+MGRsD_obs_6[MGRsD_obs_6$studynumber == 4270 & MGRsD_obs_6$Measure_Year==2005 , 'Measure_Year'] <- 2003
+MGRsD_obs_6[MGRsD_obs_6$studynumber == 4477 , 'Measure_Year'] <- 2002
+MGRsD_obs_6[MGRsD_obs_6$studynumber == 10002 , 'Measure_Year'] <- 1999
+MGRsD_obs_6[MGRsD_obs_6$studynumber == 10035 , 'Measure_Year'] <- 2009
+MGRsD_obs_6[MGRsD_obs_6$studynumber == 10106 , 'Measure_Year'] <- 2010
+```
+
+```{r, message=FALSE}
+# Data processing before Q10 calculation
+MGRsD_obs_6 <- check_ID_year(MGRsD_obs_6)
+```
+
+
+```{r, results = 'hide', message = FALSE, include = FALSE}
+# calculate Q10 by site of each year
+MGRsD_Q10 <- Q10_cal(MGRsD_obs_6)
+```
+
+```{r}
+# plot Q10
+MGRsD_Q10 <- MGRsD_Q10[MGRsD_Q10$Q10SY <= 10, ]
+max(MGRsD_Q10$p_Q)
+MGRsD_Q10 <- MGRsD_Q10[MGRsD_Q10$p_Q <= 0.1,]
+MGRsD_Q10$Decades <- ifelse (MGRsD_Q10$studyYear <= 2000, '1990s', '2000s')
+mean(MGRsD_Q10$Q10)
+ggplot(data = MGRsD_Q10, aes(Q10SY)) + geom_histogram(fill = 'gray', col = 'black', binwidth = 0.25, alpha = 0.25)
+```
+
+* Q10(calculated from air temperature) of 1990s does not signifficantly differ from Q10 of 2000s (Time for warming)
+* Q10 does not show a clear trend when changing from warm biome (Tropic, A) to cold biome (Boreal, D) (Space for time)
+ 
+
+```{r, fig.width=8, fig.height=3}
+# Q10 by decades
+Q10_byDecade <- summarySE(MGRsD_Q10, measurevar="Q10SY", groupvars=c("Decades"))
+GQ10_dec <- ggplot (Q10_byDecade, aes(x = Decades, y = Q10SY))
+GQ10_dec <- GQ10_dec + geom_bar(stat="identity", col="black", 
+                 fill="white",width=.75) +
+  labs(x="Decades", y=expression("Q "[10])) +
+  geom_errorbar(aes(ymin=Q10SY-se, ymax=Q10SY+se), colour="black", width=0.5)+
+  coord_cartesian(ylim=c(0, 4))
+  #annotate("text", x = 8, y = 4, label = "n=9", cex = 2.5)+
+  #annotate("text", x = 1, y = 4.5, label = "A,B,C,D", cex = 2.5)+
+  #annotate("text", x = 1, y = 5.85, label = "a", cex = 5)
+
+# Q10 by climate region
+Q10_byRegion <- summarySE(MGRsD_Q10, measurevar="Q10SY", groupvars=c("MiddleClimate"))
+GQ10 <- ggplot (Q10_byRegion, aes(x = MiddleClimate, y = Q10SY))
+
+GQ10 <- GQ10 + geom_bar( stat="identity", col="black", 
+                 fill="white",width=.75) +
+  labs(x="Climate regions", y=element_blank()) +
+  geom_errorbar(aes(ymin=Q10SY-se, ymax=Q10SY+se), colour="black", width=0.5)+
+  coord_cartesian(ylim=c(0, 4))+
+  
+  annotate("text", x = 1, y = 0.5, label = "A-D (n=24)", cex = 3.0, angle = 90, hjust = 0)+
+  annotate("text", x = 2, y = 0.5, label = "D (n=34)", cex = 3.0, angle = 90, hjust = 0)+
+  annotate("text", x = 3, y = 0.5, label = "B-D (n=345)", cex = 3.0, angle = 90, hjust = 0)+
+  annotate("text", x = 4, y = 0.5, label = "C,D (n=64)", cex = 3.0, angle = 90, hjust = 0)+
+  annotate("text", x = 5, y = 0.5, label = "A-D (n=51)", cex = 3.0, angle = 90, hjust = 0)+
+  annotate("text", x = 6, y = 0.5, label = "A,B (n=155)", cex = 3.0, angle = 90, hjust = 0)+
+  annotate("text", x = 7, y = 0.5, label = "A-C (n=59)", cex = 3.0, angle = 90, hjust = 0)+
+  annotate("text", x = 8, y = 0.5, label = "A (n=9)", cex = 3.0, angle = 90, hjust = 0)+
+  theme(legend.title=element_blank())
+
+# Q10 relationship with Tm (mean in each climate region)
+Tm.Climate <- summarySE(PT_Del, measurevar="Tm", groupvars=c("MiddleClimate"))
+Tm.Climate
+
+Q10.Tm <- cbind(Tm.Climate, Q10_byRegion)
+Q10.Tm <- Q10.Tm[c(-8), c(-1,-2)]
+summary(lm(Q10SY~Tm, data = Q10.Tm))
+
+p_Q10_Tm <- ggplot(Q10.Tm, aes(Tm, Q10SY)) +   
+  geom_point()+
+  geom_smooth(method="lm")+
+  coord_cartesian(ylim=c(0, 4))+
+  labs(x=expression("Air temperature "*"("*degree~C*")")
+       ,y=element_blank())
+
+plot_grid(GQ10_dec, GQ10, p_Q10_Tm, ncol = 3, labels = c("(a)", "(b)", "(c)")
+          , hjust = c(-2.5), vjust = c(2.5))
+```
+
+```{r}
+ggplot(MGRsD_Q10, aes(Q10SY, color = (studyYear>2000), fill = (studyYear>2000)) ) + geom_density(stat = 'density', alpha = 0.25 ) +
+    ggtitle('Q10 from MGRsD: 1990s vs 2000s') +
+    xlab(expression(Q[10])) +
+    theme(legend.position = c(0.75,0.65), legend.background = element_rect(colour = 'transparent', fill = alpha('white', 0), size = 0.75) )
+```
+
+```{r}
+# plot by each biome
+var_biome <- sort(unique(MGRsD_Q10$MiddleClimate))
+for(i in 1:length(var_biome)) {
+  MGRsD_Q10_biuome <- MGRsD_Q10[MGRsD_Q10$MiddleClimate == var_biome[i],]
+  p <- ggplot(MGRsD_Q10_biuome, aes(Q10SY, color = (studyYear>2000), fill = (studyYear>2000)) ) + 
+    geom_density(stat = 'density', alpha = 0.25 ) +
+    ggtitle(var_biome[i]) +
+    xlab(expression(Q[10])) +
+    theme(legend.position = c(0.75,0.65), legend.background = element_rect(colour = 'transparent', fill = alpha('white', 0), size = 0.75))
+  
+  print(p)
+  }
+
+```
+
+
+* Using SRDB_V4 (Q10 from soil temperature, Q10 are directly collected from publication)
+
+```{r Q10 test, fig.height=6, fig.width=8}
+# compare Q10 of 1961-1990 (30 years) vs 1991-2014
+# colnames(srdb_v4)
+Q10_1 <- Q10_early_late (srdb_v4, 'Q10_0_10', ' A (0-10 cm) ')
+Q10_2 <- Q10_early_late (srdb_v4, 'Q10_5_15', ' B (5-15 cm) ')
+Q10_3 <- Q10_early_late (srdb_v4, 'Q10_10_20', ' C (10-20 cm) ')
+Q10_4 <- Q10_early_late (srdb_v4, 'Q10_0_20', ' D (0-20 cm) ')
+
+plot_grid (Q10_1, Q10_2, Q10_3, Q10_4, ncol = 2)  
+
+```
+
+```{r R10 test}
+# test Q10 under Ra and Rh dominant sites
+R10_early_late (srdb_v4, 'R10', 'Test R10 for early and late years')
+
+```
+
+
+```{r}
+# test Q10 by Biome
+srdb_sub <- filtration (srdb_v4, 'Q10_0_10')
+var_filt <- sort(unique(srdb_sub$Biome))
+var_filt <- var_filt[c(-3, -4, -6)]
+for (i in 1:length(var_filt)) {
+  srdb_biome <- srdb_sub[srdb_sub$Biome == var_filt[i], ]
+  Q10_1 <- Q10_early_late (srdb_biome, 'Q10_0_10', paste0(var_filt[i]," (0-10cm)"))
+  print(Q10_1)
+}
+```
+
+
+```{r}
+# test R10 by biome
+srdb_sub <- filtration (srdb_v4, 'R10')
+var_filt <- sort(unique(srdb_sub$Biome))
+# var_filt <- var_filt[c(-3, -4, -6)]
+for (i in 1:length(var_filt)) {
+  srdb_biome <- srdb_sub[srdb_sub$Biome == var_filt[i], ]
+  R10_early_late (srdb_biome, 'R10', var_filt[i])
+}
+```
+
