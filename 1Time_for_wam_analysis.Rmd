@@ -36,6 +36,9 @@ library(cowplot)
 library(knitr)
 library("ggpubr")
 library(reshape)
+# install.packages('zoo')
+library(zoo)
+library(Kendall)
 
 # Source all needed functions
 source('functions.R')
@@ -46,45 +49,20 @@ source('functions.R')
 ```{r}
 # input data
 srdb_v4 <- read.csv(INFN, stringsAsFactors=F)
+srdb_v4$Decades <- ifelse (srdb_v4$Year <= 2000, '1990s', '2010s')
+srdb_v4$Q10_all <- coalesce(srdb_v4$Q10_0_10, srdb_v4$Q10_0_20, srdb_v4$Q10_5_15, srdb_v4$Q10_10_20, srdb_v4$Q10_other1, srdb_v4$Q10_other2)
+
 PT_Del <- read.csv(paste0(DATA_DIR,'/', Global_PT_Del), header = T)
 MGRsD <- read.csv(paste0(DATA_DIR, '/', MGRsD_ALLData), header = T)
 MGRsD_obs_6 <- read.csv(paste0(DATA_DIR, '/', 'MGRsDObsLargerThan6_V3.CSV'), header = T)
+
+longterm <- read.csv( paste0(DATA_DIR, '/', "LongTerm.csv"), header = T, row.names = 1, skip = 3 )
 ```
 
-* We compared mean annual air temperature bwtween 1964 and 2000 (1990s) vs. mean air temperature between 2001 and 2017 (2000s)
-* Air temperature of 1990s (1964-2000) are about 0.5 C lower than that from 2000s(2001-2017)
-* In boreal and polar regions, the temperature difference is bigger (difference ~~ 1 C)
-* Therefore, 1990s are treated as control, 2000s are treated as warming period
-
-```{r}
-# temperature of 1990s vs 2010s
-ggplot(PT_Del, aes(Decades,  Tm)) +   
-  geom_boxplot()+
-  facet_wrap(~MiddleClimate, nrow = 2,scales = "free")+ 
-  labs(y=expression("Air temperature "*"("*degree~C*")"))
-```
-
-* Using Rs data from MGRsD, we analyzed Rs vs. temperature in different biome for 1990s and 2000s
-* How Rs response to temperature change does not shift in 2000s comparing to 1990s in most biome
-
-```{r, fig.height=8, fig.width=8}
-# use ggplot
-p <- ggplot (MGRsD, aes(Tm, RsLog, colour = Decades))
-p <- p + geom_point(alpha = 0.2, size = 1) + geom_smooth(method = 'lm') +
-  facet_wrap(~MiddleClimate, ncol = 2) + 
-  labs( y = expression(ln(Rs)~(g~C~m^{-2}~d^{-1} ))
-       ,x = expression(Air~temperature~(degree~C) ) ) +
-  theme(legend.position = 'top')
-p
-```
-
-* We selected sites from MGRsD with more than 7 months' Rs measurements
-* For each sites, we simulate the ewlationshio between Rs and Tm (air temperature) with Rs=axexp^bxTm
-* According to parameter b, we can calculate Q10=exp(b+Tm+10) / exp(b+Tm)
 
 
 ```{r}
-# Data processing before Q10 calculation
+# Data processing before Q10 calculation: some sites's year need change 
 MGRsD_obs_6[MGRsD_obs_6$studynumber == 1971 & MGRsD_obs_6$Measure_Year==1998 , 'Measure_Year'] <- 1999
 MGRsD_obs_6[MGRsD_obs_6$studynumber == 3619 & MGRsD_obs_6$Measure_Year==2000 , 'Measure_Year'] <- 2001
 MGRsD_obs_6[MGRsD_obs_6$studynumber == 4234 & MGRsD_obs_6$Measure_Year==1998 , 'Measure_Year'] <- 1999
@@ -102,8 +80,9 @@ MGRsD_obs_6[MGRsD_obs_6$studynumber == 10035 , 'Measure_Year'] <- 2009
 MGRsD_obs_6[MGRsD_obs_6$studynumber == 10106 , 'Measure_Year'] <- 2010
 ```
 
+
 ```{r, message=FALSE}
-# Data processing before Q10 calculation
+# DBefore Q10 calculation: check number of years of each site
 MGRsD_obs_6 <- check_ID_year(MGRsD_obs_6)
 ```
 
@@ -111,6 +90,23 @@ MGRsD_obs_6 <- check_ID_year(MGRsD_obs_6)
 ```{r, results = 'hide', message = FALSE, include = FALSE}
 # calculate Q10 by site of each year
 MGRsD_Q10 <- Q10_cal(MGRsD_obs_6)
+MGRsD_Q10 <- subset(MGRsD_Q10, MGRsD_Q10$Q10SY > 1 & MGRsD_Q10$Q10SY < 10)
+MGRsD_Q10 <- subset(MGRsD_Q10, MGRsD_Q10$MiddleClimate != "A")
+```
+
+
+
+* We compared mean annual air temperature bwtween 1964 and 2000 (1990s) vs. mean air temperature between 2001 and 2017 (2000s)
+* Air temperature of 1990s (1964-2000) are about 0.5 C lower than that from 2000s(2001-2017)
+* In boreal and polar regions, the temperature difference is bigger (difference ~~ 1 C)
+* Therefore, 1990s are treated as control, 2000s are treated as warming period
+
+```{r}
+# temperature of 1990s vs 2010s
+ggplot(PT_Del, aes(Decades,  Tm)) +   
+  geom_boxplot()+
+  facet_wrap(~MiddleClimate, nrow = 2,scales = "free")+ 
+  labs(y=expression("Air temperature "*"("*degree~C*")"))
 ```
 
 ```{r}
@@ -118,66 +114,69 @@ MGRsD_Q10 <- Q10_cal(MGRsD_obs_6)
 MGRsD_Q10 <- MGRsD_Q10[MGRsD_Q10$Q10SY <= 10, ]
 max(MGRsD_Q10$p_Q)
 MGRsD_Q10 <- MGRsD_Q10[MGRsD_Q10$p_Q <= 0.1,]
-MGRsD_Q10$Decades <- ifelse (MGRsD_Q10$studyYear <= 2000, '1990s', '2000s')
+MGRsD_Q10$Decades <- ifelse (MGRsD_Q10$studyYear <= 2000, '1990s', '2010s')
 mean(MGRsD_Q10$Q10)
 ggplot(data = MGRsD_Q10, aes(Q10SY)) + geom_histogram(fill = 'gray', col = 'black', binwidth = 0.25, alpha = 0.25)
 ```
 
-* Q10(calculated from air temperature) of 1990s does not signifficantly differ from Q10 of 2000s (Time for warming)
-* Q10 does not show a clear trend when changing from warm biome (Tropic, A) to cold biome (Boreal, D) (Space for time)
- 
+* We used data from both srdb_v4 and MGRsD 
 
-```{r, fig.width=8, fig.height=3}
-# Q10 by decades
-Q10_byDecade <- summarySE(MGRsD_Q10, measurevar="Q10SY", groupvars=c("Decades"))
-GQ10_dec <- ggplot (Q10_byDecade, aes(x = Decades, y = Q10SY))
-GQ10_dec <- GQ10_dec + geom_bar(stat="identity", col="black", 
-                 fill="white",width=.75) +
-  labs(x="Decades", y=expression("Q "[10])) +
-  geom_errorbar(aes(ymin=Q10SY-se, ymax=Q10SY+se), colour="black", width=0.5)+
-  coord_cartesian(ylim=c(0, 4))
-  #annotate("text", x = 8, y = 4, label = "n=9", cex = 2.5)+
-  #annotate("text", x = 1, y = 4.5, label = "A,B,C,D", cex = 2.5)+
-  #annotate("text", x = 1, y = 5.85, label = "a", cex = 5)
+* For data from MGRsD, only sites with more than 7 months' Rs measurements were used
+* For each sites, we simulate the ewlationshio between Rs and Tm (air temperature) with Rs=axexp^bxTm
+* According to parameter b, we can calculate Q10=exp(b*10) 
 
-# Q10 by climate region
-Q10_byRegion <- summarySE(MGRsD_Q10, measurevar="Q10SY", groupvars=c("MiddleClimate"))
-GQ10 <- ggplot (Q10_byRegion, aes(x = MiddleClimate, y = Q10SY))
+* Q10 does not show a clear trend when changing from warm biome to cold biome (negative relationship between Q10 and annual mean temperature, Space for time)
+* Q10 of 1990s does not signifficantly differ from Q10 of 2010s (Time for warming, panel b and d represent data from srdb_v4 and MGRsD respectively)
 
-GQ10 <- GQ10 + geom_bar( stat="identity", col="black", 
-                 fill="white",width=.75) +
-  labs(x="Climate regions", y=element_blank()) +
-  geom_errorbar(aes(ymin=Q10SY-se, ymax=Q10SY+se), colour="black", width=0.5)+
-  coord_cartesian(ylim=c(0, 4))+
-  
-  annotate("text", x = 1, y = 0.5, label = "A-D (n=24)", cex = 3.0, angle = 90, hjust = 0)+
-  annotate("text", x = 2, y = 0.5, label = "D (n=34)", cex = 3.0, angle = 90, hjust = 0)+
-  annotate("text", x = 3, y = 0.5, label = "B-D (n=345)", cex = 3.0, angle = 90, hjust = 0)+
-  annotate("text", x = 4, y = 0.5, label = "C,D (n=64)", cex = 3.0, angle = 90, hjust = 0)+
-  annotate("text", x = 5, y = 0.5, label = "A-D (n=51)", cex = 3.0, angle = 90, hjust = 0)+
-  annotate("text", x = 6, y = 0.5, label = "A,B (n=155)", cex = 3.0, angle = 90, hjust = 0)+
-  annotate("text", x = 7, y = 0.5, label = "A-C (n=59)", cex = 3.0, angle = 90, hjust = 0)+
-  annotate("text", x = 8, y = 0.5, label = "A (n=9)", cex = 3.0, angle = 90, hjust = 0)+
-  theme(legend.title=element_blank())
-
-# Q10 relationship with Tm (mean in each climate region)
-Tm.Climate <- summarySE(PT_Del, measurevar="Tm", groupvars=c("MiddleClimate"))
-Tm.Climate
-
-Q10.Tm <- cbind(Tm.Climate, Q10_byRegion)
-Q10.Tm <- Q10.Tm[c(-8), c(-1,-2)]
-summary(lm(Q10SY~Tm, data = Q10.Tm))
-
-p_Q10_Tm <- ggplot(Q10.Tm, aes(Tm, Q10SY)) +   
-  geom_point()+
-  geom_smooth(method="lm")+
-  coord_cartesian(ylim=c(0, 4))+
-  labs(x=expression("Air temperature "*"("*degree~C*")")
-       ,y=element_blank())
-
-plot_grid(GQ10_dec, GQ10, p_Q10_Tm, ncol = 3, labels = c("(a)", "(b)", "(c)")
-          , hjust = c(-2.5), vjust = c(2.5))
+```{r, fig.width=8, fig.height=5}
+plot_tfw_sft(srdb_v4, MGRsD_Q10)
 ```
+
+* Why we see a clear Q10 decrease as annual temperature decrease, but cannot see the difference between 1990s and 2000s?
+* (1) The temperature change is small, the soil respiration response (Q10) is too small to detect.
+* (2) Hypothesis: some sites Q10 increase, site sites Q10 decrease, depend on ... ...
+* As we seperate by biome region, we do see Q10 increased in arctic and boreal, but no change in other regions.
+```{r, fig.height=7, fig.width=8}
+# Q10 of 2010s and 1990s by biome 
+srdb_Q10_biome(srdb_v4)
+```
+
+```{r}
+biome_MLR_srdb (srdb_v4)
+```
+
+
+* Same results using data from MGRsD
+* Using Rs data from MGRsD, we analyzed Rs vs. temperature in different biome for 1990s and 2000s
+* How Rs response to temperature change does not shift in 2000s comparing to 1990s in most biome
+
+```{r, fig.height=8, fig.width=8}
+
+# use ggplot
+p <- ggplot (MGRsD, aes(Tm, RsLog, colour = Decades))
+p <- p + geom_point(alpha = 0.2, size = 1) + geom_smooth(method = 'lm') +
+  facet_wrap(~MiddleClimate, ncol = 2) + 
+  labs( y = expression(ln(Rs)~(g~C~m^{-2}~d^{-1} ))
+       ,x = expression(Air~temperature~(degree~C) ) ) +
+  theme(legend.position = 'top')
+p
+
+```
+
+* using baysian approach?
+
+```{r}
+sum_MLR <- biome_MLR_MGRsD(MGRsD)
+print(sum_MLR)
+```
+
+```{r}
+# srdb_biome_comparisom (srdb_v4)
+```
+
+
+
+# Distribution of Q10 (not significant)
 
 ```{r}
 ggplot(MGRsD_Q10, aes(Q10SY, color = (studyYear>2000), fill = (studyYear>2000)) ) + geom_density(stat = 'density', alpha = 0.25 ) +
@@ -237,6 +236,7 @@ for (i in 1:length(var_filt)) {
 ```
 
 
+
 ```{r}
 # test R10 by biome
 srdb_sub <- filtration (srdb_v4, 'R10')
@@ -248,3 +248,96 @@ for (i in 1:length(var_filt)) {
 }
 ```
 
+
+
+* Wether the Q10 response can be detected in site scale?
+** using site scale long term Rs measurement (no experiment manipulation, i.e., only control used if have warming, N-addition, CO2 increasing)
+** using results from Ben's AGU present results?
+
+```{r, fig.height=3, fig.width=8}
+
+# test first site
+sub_longterm <- longterm[, 1] 
+# plot rlling mean of 3 years 
+
+x1 <- c(1:length(sub_longterm))
+y1 <- sub_longterm
+
+# plot raw data vs rolling mean data
+sub_data <- data.frame(x1, y1)
+raw_plot <- ggplot (aes(x1, y1),  data = sub_data) + geom_col() +
+  scale_x_continuous(breaks = seq(0,25,5)) +
+  labs(x = "Years after 1st Rs measurement", y = expression(Rs_annual~"("~g~C~m^{2}~yr^{-1}~")")) + 
+  ggtitle ("(a) Raw data")
+
+
+# roling mean by 3
+rolingmean <- movingAverage (y1, 3)
+sub_data <- data.frame(rolingmean[3:length(y1)], 1:length(rolingmean[3:length(y1)]) )
+colnames(sub_data) <- c('y1', 'x1')
+
+# lines(x1, rolingmean, col="green", lwd=2)
+roling <- ggplot (aes(x1, y1),  data = sub_data) + geom_col() + 
+  labs(x = "Years after 1st Rs measurement", y = expression(Rs_annual~"("~g~C~m^{2}~yr^{-1}~")")) +
+  ggtitle("(b) Rolling mean of 3 yrs")
+
+plot_grid(raw_plot, roling, ncol = 2, hjust = c(-3.25, -2.5), vjust = c(2.5, 2.5))
+  
+```
+
+
+
+```{r}
+# all 36 sites' average trend
+# step 1: need scale data 
+# maxs <- max( as.matrix(longterm), na.rm = T ) %>% rep(36)
+# mins <- min( as.matrix(longterm), na.rm = T ) %>% rep(36)
+# scaled <- as.data.frame(scale(longterm, center = mins, scale = maxs - mins))
+# 
+# # step 2: moving average
+# out <- data.frame(rep(NA, 26))
+# for(i in 1: ncol(scaled)) {
+#   sub_data <- scaled[, i]
+#   rolingmean <- movingAverage (sub_data, 3) %>% data.frame()
+#   out <- bind_cols (out, rolingmean)
+# }
+# 
+# out <- out[-1:-2, -1]
+# colnames(out) <- colnames(longterm)
+# 
+# out$row_mean <- rowMeans(out, na.rm = TRUE, dims = 1)
+# 
+# roling <- ggplot (aes(1:24, row_mean),  data = out) + geom_col() + 
+#   labs(x = "Years after 1st Rs measurement", y = expression(Rs_annual~"("~g~C~m^{2}~yr^{-1}~")")) +
+#   ggtitle("Rolling mean of 3 yrs")
+# 
+# roling
+```
+
+
+* Each site (at least 5 years continous measurement), Mann-Kendall test was used to detect the trend change
+* tau > 0 means increase trend, tau > 0.184 means significant increase trend
+* tau < 0 means decrease trend, tau < -0.184 means significant decrease trenc
+* the results show that overall, there are no trend (tau values not significantly differ from 0)
+* also using long term SOC data do the same test?
+
+
+```{r}
+# Mann-Kendall test for each site and see whether the slope differ from 0
+longtern_test(longterm)
+```
+
+
+* How soil respiration response to precipitation change?
+* Q10 vs PDSI regression
+* Results show that there are no singificant relationship between Q10 and drought (indentified by PDSI)
+
+```{r}
+Q10_pdsi(srdb_v4)
+```
+
+* Using SPI to detect temporal trend of precipitation?
+* And then see whether Q10 values have relationship with SPI trend?
+* Q10 vs SPI tau values ?
+* First, need get global MK test and get tau value for each site
+* Second, see how Q10 differ among different tau range ()
