@@ -8,6 +8,9 @@ mround <- function(x,base){
   base*round(x/base) 
 }
 
+# not in function
+'%!in%' <- function(x,y)!('%in%'(x,y))
+
 summarySE <- function(data=NULL, measurevar, groupvars=NULL, na.rm=FALSE,
                       conf.interval=.95, .drop=TRUE) {
   library(plyr)
@@ -146,7 +149,6 @@ check_ID_year <- function (sdata) {
 }
 
 # Calculate Q10 for each studynumber under each year
-
 Q10_cal <- function (sdata) {
   results <- data.frame()
   n_ID <- sort(unique(sdata$studynumber))
@@ -199,9 +201,7 @@ Q10_cal <- function (sdata) {
 #****************************************************************************************************
 # plot and show time for warm and space for time
 
-
 plot_tfw_sft <- function(sdata, sdata2) {
-  
   # Q10 vs MAT (space for time appraoch)
   sdata <- subset(sdata, sdata$Q10_all < 10)
   srdb_Q10_MAT <- ggplot(sdata, aes(TAnnual_Del, Q10_all)) +
@@ -390,7 +390,6 @@ Q10_early_late <- function(sdata, Q10_type, var_title) {
 
 
 R10_early_late <- function (sdata, R10_type, var_title) {
-  print(SEPARATOR)
   sdata <- sdata[!is.na(sdata$R10), ]
   sdata <- sdata[!is.na(sdata$Year), ]
   sdata <- sdata[sdata$R10 > 0 & sdata$R10 < 10, ]

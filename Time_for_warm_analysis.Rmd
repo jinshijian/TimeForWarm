@@ -3,32 +3,14 @@ title: "1Time_for_warm_analysis.rmd, COSORE dataset - daytime as warm treatment"
 output: html_document
 ---
 
-
-
 ```{r preliminaries, message=TRUE, include=FALSE, echo=FALSE}
 # Set chunks defaults; these options will be applied to all subsequent chunks
 knitr::opts_chunk$set(results = 'hide', message = TRUE, include = TRUE, echo = FALSE,
                       fig.height = 4.5, fig.width = 8, cache = T)
-
-# Constants
-OUTPUT_DIR		<- "outputs/"
-SEPARATOR		<- "-------------------------------------------"
-INFN 			<- "srdbv4/srdbv4.csv"
-OUTFN 			<- "srdbv4_final.csv"
-DATA_DIR <- 'other_data'
-Global_PT_Del <- 'GlobalTempPrecipTimeSeries_Del.csv'
-MGRsD_ALLData <- 'MGRsDAllData.csv'
-
-
-# Create output and log folders if they do not exist
-if(!file.exists(OUTPUT_DIR)) dir.create(OUTPUT_DIR)
-if(!file.exists(LOG_DIR)) dir.create( LOG_DIR )
-
 # install.packages('cowplot')
 # Load required packages
 library(cowplot)
 library(data.table)
-library(dplyr)
 library(ggplot2)
 theme_set(theme_bw())
 library(lubridate)
@@ -40,77 +22,29 @@ library(reshape)
 # install.packages('Kendall')
 library(zoo)
 library(Kendall)
-
 # library(cosore)
 library(dplyr)
 library(lubridate)
-
 # Source all needed functions
-source('functions.R')
-```
-
-
-
-```{r}
-# input data
-srdb_v4 <- read.csv(INFN, stringsAsFactors=F)
-srdb_v4$Decades <- ifelse (srdb_v4$Year <= 2000, '1990s', '2010s')
-srdb_v4$Q10_all <- coalesce(srdb_v4$Q10_0_10, srdb_v4$Q10_0_20, srdb_v4$Q10_5_15, srdb_v4$Q10_10_20, srdb_v4$Q10_other1, srdb_v4$Q10_other2)
-
-PT_Del <- read.csv(paste0(DATA_DIR,'/', Global_PT_Del), header = T)
-MGRsD <- read.csv(paste0(DATA_DIR, '/', MGRsD_ALLData), header = T)
-MGRsD_obs_6 <- read.csv(paste0(DATA_DIR, '/', 'MGRsDObsLargerThan6_V3.CSV'), header = T)
-
-longterm <- read.csv( paste0(DATA_DIR, '/', "LongTerm.csv"), header = T, row.names = 1, skip = 0 )
+source('Rcode/functions.R')
 ```
 
 
 ```{r}
-# Read cosore dataset
-cosore <- readRDS("other_data/cosore_data.RDS")
+# get data
+srdb_v4 <- drake::readd(srdb_v4) 
+srdb_v5 <- drake::readd(srdb_v5)
+PT_Del <- drake::readd(PT_Del)
+MGRsD <- drake::readd(MGRsD)
+MGRsD_Q10 <- drake::readd(MGRsD_Q10)
+longterm <- drake::readd(longterm)
 ```
-
-
-```{r}
-# Data processing before Q10 calculation: some sites's year need change 
-MGRsD_obs_6[MGRsD_obs_6$studynumber == 1971 & MGRsD_obs_6$Measure_Year==1998 , 'Measure_Year'] <- 1999
-MGRsD_obs_6[MGRsD_obs_6$studynumber == 3619 & MGRsD_obs_6$Measure_Year==2000 , 'Measure_Year'] <- 2001
-MGRsD_obs_6[MGRsD_obs_6$studynumber == 4234 & MGRsD_obs_6$Measure_Year==1998 , 'Measure_Year'] <- 1999
-MGRsD_obs_6[MGRsD_obs_6$studynumber == 4234 & MGRsD_obs_6$Measure_Year==2005 , 'Measure_Year'] <- 2003
-MGRsD_obs_6[MGRsD_obs_6$studynumber == 4234 & MGRsD_obs_6$Measure_Year==2004 , 'Measure_Year'] <- 2003
-MGRsD_obs_6[MGRsD_obs_6$studynumber == 4234 & MGRsD_obs_6$Measure_Year==2001 , 'Measure_Year'] <- 2003
-MGRsD_obs_6[MGRsD_obs_6$studynumber == 4015 , 'Measure_Year'] <- 2002
-MGRsD_obs_6[MGRsD_obs_6$studynumber == 4270 & MGRsD_obs_6$Measure_Year==1998 , 'Measure_Year'] <- 1999
-MGRsD_obs_6[MGRsD_obs_6$studynumber == 4270 & MGRsD_obs_6$Measure_Year==2001 , 'Measure_Year'] <- 2002
-MGRsD_obs_6[MGRsD_obs_6$studynumber == 4270 & MGRsD_obs_6$Measure_Year==2004 , 'Measure_Year'] <- 2003
-MGRsD_obs_6[MGRsD_obs_6$studynumber == 4270 & MGRsD_obs_6$Measure_Year==2005 , 'Measure_Year'] <- 2003
-MGRsD_obs_6[MGRsD_obs_6$studynumber == 4477 , 'Measure_Year'] <- 2002
-MGRsD_obs_6[MGRsD_obs_6$studynumber == 10002 , 'Measure_Year'] <- 1999
-MGRsD_obs_6[MGRsD_obs_6$studynumber == 10035 , 'Measure_Year'] <- 2009
-MGRsD_obs_6[MGRsD_obs_6$studynumber == 10106 , 'Measure_Year'] <- 2010
-```
-
-
-```{r, include=FALSE}
-# DBefore Q10 calculation: check number of years of each site
-MGRsD_obs_6 <- check_ID_year(MGRsD_obs_6)
-```
-
-
-```{r, results = 'hide', message = FALSE, include = FALSE}
-# calculate Q10 by site of each year
-MGRsD_Q10 <- Q10_cal(MGRsD_obs_6)
-MGRsD_Q10 <- subset(MGRsD_Q10, MGRsD_Q10$Q10SY > 1 & MGRsD_Q10$Q10SY < 10)
-MGRsD_Q10 <- subset(MGRsD_Q10, MGRsD_Q10$MiddleClimate != "A")
-```
-
 
 
 * We compared mean annual air temperature bwtween 1964 and 2000 (1990s) vs. mean air temperature between 2001 and 2017 (2000s)
 * Air temperature of 1990s (1964-2000) are about 0.5 C lower than that from 2000s(2001-2017)
 * In boreal and polar regions, the temperature difference is bigger (difference ~~ 1 C)
 * Therefore, 1990s are treated as control, 2000s are treated as warming period
-
 ```{r}
 # temperature of 1990s vs 2010s
 ggplot(PT_Del, aes(Decades,  Tm)) +   
@@ -118,6 +52,34 @@ ggplot(PT_Del, aes(Decades,  Tm)) +
   facet_wrap(~MiddleClimate, nrow = 2,scales = "free")+ 
   labs(y=expression("Air temperature "*"("*degree~C*")"))
 ```
+
+
+* Wether the Q10 response can be detected in site scale?
+** using site scale long term Rs measurement (no experiment manipulation, i.e., only control used if have warming, N-addition, CO2 increasing)
+** using results from Ben's AGU present results?
+```{r}
+n_sample <- c(84,84,84,84,84,53,38,31,19,12,10,10,10,10,10,10,10,10)
+n_study <- c(48,48,48,48,48,31,23,16,7,4,2,2,2,2,2,2,2,2)
+paste0(n_sample,"/",n_study)
+  
+sub_longterm <- longterm[,c(1,which(colnames(longterm) == "count"), which(colnames(longterm) == "year1"): which(colnames(longterm) == "year18"))]
+
+sub_longterm %>% 
+  select(-StudyID, -count) %>% 
+  tidyr::gather() %>% 
+  ggplot(aes(key, value)) +
+  geom_violin(fill = "skyblue") +
+  scale_x_discrete(limits = c("year1","year2","year3","year4","year5","year6",
+                              "year7","year8","year9","year10","year11","year12",
+                              "year13","year14","year15","year16","year17","year18"),
+                   labels = c(1:18)) +
+  stat_summary(fun.y=median, geom="point", size=2, color="red") +
+  labs(x = expression(Years~since~experiment),
+       y = expression(Annual~R[S]~anomaly~(g~C~m^{-2}~yr^{-1}))) +
+  ylim(-500, 1800) +
+  annotate("text", x=1:18, y=1700, label=paste0(n_sample,"/",n_study), angle = 90)
+```
+
 
 ```{r}
 # plot Q10
@@ -181,13 +143,12 @@ print(sum_MLR)
 ```
 
 ```{r}
-# srdb_biome_comparisom (srdb_v4)
+srdb_biome_comparisom (srdb_v4)
 ```
 
 
 
 # Distribution of Q10 (not significant)
-
 ```{r}
 ggplot(MGRsD_Q10, aes(Q10SY, color = (studyYear>2000), fill = (studyYear>2000)) ) + geom_density(stat = 'density', alpha = 0.25 ) +
     ggtitle('Q10 from MGRsD: 1990s vs 2000s') +
@@ -260,26 +221,63 @@ for (i in 1:length(var_filt)) {
 
 
 
-* Wether the Q10 response can be detected in site scale?
-** using site scale long term Rs measurement (no experiment manipulation, i.e., only control used if have warming, N-addition, CO2 increasing)
-** using results from Ben's AGU present results?
 
-```{r, fig.height=3, fig.width=8}
 
+
+* How soil respiration response to precipitation change?
+* Q10 vs PDSI regression
+* Results show that there are no singificant relationship between Q10 and drought (indentified by PDSI)
+```{r}
+Q10_pdsi(srdb_v4)
+```
+
+* Using SPI to detect temporal trend of precipitation?
+* And then see whether Q10 values have relationship with SPI trend?
+* Q10 vs SPI tau values ?
+* First, need get global MK test and get tau value for each site
+* Second, see how Q10 differ among different tau range () ?
+
+```{r}
+# get study number from srdb_v5 which have more than 5 years of Rs measurement
+# 10977 can be read from the fiture
+study_exc <- c(6935,4174,3301,3302,3254,3197,6347,4864,3581,5935,
+               2927,1654,5278,6451,4333,4564,4938,5519,6504,2656,
+               7290,7636,10266,2298,
+               # already in the longterm data
+  
+               # checked in srdb and mgrsd
+               467,864,1980,2018,2601,2926,2960,
+               3390,4212,4234,4270,4979,5545,5984,6816,7087,
+               7613,8699,8700,9845,10449,10624,10820,10951,10977,11054,11913,
+               # checked github issue
+               4333,4348,10614,10466,11054,
+               # checked srdb by study_number and site_id
+               1891,2056,2904,3053,4018,4442,4894,5162,5688,6438,6975,7634,8479,
+               8534,10066,10483,10564,10910,11366)
+srdb_v5 %>% 
+  filter(!is.na(Rs_annual)) %>% 
+  select(Rs_annual, Study_number, YearsOfData) %>% 
+  count(Study_number, YearsOfData) %>% 
+  filter(YearsOfData>=5 & Study_number %!in% study_exc)
+
+srdb_v5 %>% 
+  filter(!is.na(Rs_annual)) %>% 
+  select(Rs_annual, Study_number, Site_ID) %>% 
+  count(Study_number, Site_ID) %>% 
+  filter(Study_number %!in% study_exc) %>% 
+  filter(n > 4)
+```
+
+
+## code no longer used
+```{r longterm field experiment, fig.height=3, fig.width=8}
 # test first site
-sub_longterm <- longterm[, 1] 
-# plot rlling mean of 3 years 
-
-x1 <- c(1:length(sub_longterm))
-y1 <- sub_longterm
-
 # plot raw data vs rolling mean data
-sub_data <- data.frame(x1, y1)
+sub_data <- data.frame(x1 = sub_longterm[, 2], y1 = c(1:length(sub_longterm)))
 raw_plot <- ggplot (aes(x1, y1),  data = sub_data) + geom_col() +
   scale_x_continuous(breaks = seq(0,25,5)) +
   labs(x = "Years after 1st Rs measurement", y = expression(Rs_annual~"("~g~C~m^{2}~yr^{-1}~")")) + 
   ggtitle ("(a) Raw data")
-
 
 # roling mean by 3
 rolingmean <- movingAverage (y1, 3)
@@ -292,340 +290,15 @@ roling <- ggplot (aes(x1, y1),  data = sub_data) + geom_col() +
   ggtitle("(b) Rolling mean of 3 yrs")
 
 plot_grid(raw_plot, roling, ncol = 2, hjust = c(-3.25, -2.5), vjust = c(2.5, 2.5))
-  
 ```
-
-
-
-```{r, cache=TRUE}
-# all 36 sites' average trend
-# step 1: need scale data 
-# maxs <- max( as.matrix(longterm), na.rm = T ) %>% rep(36)
-# mins <- min( as.matrix(longterm), na.rm = T ) %>% rep(36)
-# scaled <- as.data.frame(scale(longterm, center = mins, scale = maxs - mins))
-# 
-# # step 2: moving average
-# out <- data.frame(rep(NA, 26))
-# for(i in 1: ncol(scaled)) {
-#   sub_data <- scaled[, i]
-#   rolingmean <- movingAverage (sub_data, 3) %>% data.frame()
-#   out <- bind_cols (out, rolingmean)
-# }
-# 
-# out <- out[-1:-2, -1]
-# colnames(out) <- colnames(longterm)
-# 
-# out$row_mean <- rowMeans(out, na.rm = TRUE, dims = 1)
-# 
-# roling <- ggplot (aes(1:24, row_mean),  data = out) + geom_col() + 
-#   labs(x = "Years after 1st Rs measurement", y = expression(Rs_annual~"("~g~C~m^{2}~yr^{-1}~")")) +
-#   ggtitle("Rolling mean of 3 yrs")
-# 
-# roling
-```
-
 
 * Each site (at least 5 years continous measurement), Mann-Kendall test was used to detect the trend change
 * tau > 0 means increase trend, tau > 0.184 means significant increase trend
 * tau < 0 means decrease trend, tau < -0.184 means significant decrease trenc
 * the results show that overall, there are no trend (tau values not significantly differ from 0)
 * also using long term SOC data do the same test?
-
-
 ```{r}
 # Mann-Kendall test for each site and see whether the slope differ from 0
-longtern_test(longterm)
+# longtern_test(longterm)
 # ncol(longterm)
 ```
-
-
-* How soil respiration response to precipitation change?
-* Q10 vs PDSI regression
-* Results show that there are no singificant relationship between Q10 and drought (indentified by PDSI)
-
-```{r}
-Q10_pdsi(srdb_v4)
-```
-
-* Using SPI to detect temporal trend of precipitation?
-* And then see whether Q10 values have relationship with SPI trend?
-* Q10 vs SPI tau values ?
-* First, need get global MK test and get tau value for each site
-* Second, see how Q10 differ among different tau range () ?
-
-
-* Using cosore data, daytime as warm and night time as control treatment ******************************************************
-
-```{r }
-tibble::glimpse(csr_table(cosore, "description"))
-desc <- csr_table(cosore, "description")
-var_dataset <- desc$CSR_DATASET
-which(var_dataset=='d20190415_VARNER')
-# ds <- cosore$d20190517_MAURITZ # nobs = 2 or 3 if use daily timescale
-```
-
-# `r ds$description$CSR_DATASET`
-
-```{r}
-# i=2, no CSR_T5 information, using TCHmber?
-i = 9
-var_dataset[i]
-# ds <- cosore$d20190409_ANJILELI
-# cosore[CSR_DATASET == 'd20190517_MAURITZ',]
-ds <- cosore$d20190517_MAURITZ
-tibble::glimpse(ds$description)
-# d <- ds$description
-# diag <- ds$diagnostics
-```
-
-
-## Site information
-
-```{r map, echo=FALSE}
-library(sp)
-library(leaflet)
-df <- data.frame(lon = ds$description$CSR_LONGITUDE, lat = ds$description$CSR_LATITUDE)
-coordinates(df) <- ~lon + lat
-leaflet(df) %>% 
-  addMarkers() %>% 
-  addTiles(options = providerTileOptions(minZoom = 3, maxZoom = 3))
-```
-
-## Reference information
-## Contributors
-
-```{r contrib_table, echo=FALSE}
-knitr::kable(unlist(ds$contributors), format = "html", col.names = c("Value")) %>% 
-  kableExtra::kable_styling(full_width = FALSE, position = "left")
-```
-
-## Measurement information
-
-**Instrument**: `r d$CSR_INSTRUMENT`
-
-**File format**: `r d$CSR_FILE_FORMAT`
-
-**Timestamp format**: `r d$CSR_TIMESTAMP_FORMAT`
-
-**Timestamp timezone**: `r d$CSR_TIMESTAMP_TZ`
-
-```{r msmt_table, echo=FALSE}
-knitr::kable(ds$ports, format = "html") %>% 
-  kableExtra::kable_styling(full_width = FALSE, position = "left")
-```
-
-## Column mapping
-
-```{r mapping, echo=FALSE}
-knitr::kable(ds$columns, format = "html") %>% 
-  kableExtra::kable_styling(full_width = FALSE, position = "left")
-```
-
-
-## Data processing diagnostics
-
-Info                |  Value
-------------------- | ----
-Records             | `r diag$CSR_RECORDS`
-Records removed (error)     | `r diag$CSR_RECORDS_REMOVED_ERR`
-Records removed (invalid timestamp)     | `r diag$CSR_RECORDS_REMOVED_TIMESTAMP`
-Records removed (no flux)   | `r diag$CSR_RECORDS_REMOVED_NA`
-Records (flux < `r diag$CSR_FLUX_LOWBOUND`)  | `r diag$CSR_RECORDS_REMOVED_TOOLOW`
-Records (flux > `r diag$CSR_FLUX_HIGHBOUND`) | `r diag$CSR_RECORDS_REMOVED_TOOHIGH`
-Columns dropped     | `r diag$CSR_COLUMNS_DROPPED`
-Bad `Tchamber` values removed | `r diag$CSR_BAD_TCHAMBER`
-Size                | `r format(object.size(ds), "Mb")`
-
-**Flux summary**:
-
-```{r flux-graphs}
-if(is.data.frame(ds$data) & !FALSE) {
-  print(summary(ds$data$CSR_FLUX))
-  
-  dsd <- subset(ds$data, !is.na(CSR_FLUX) & CSR_FLUX > 0)
-  
-  # flux over time
-  p1 <- ggplot(dsd, aes(CSR_TIMESTAMP, CSR_FLUX, color = CSR_PORT)) + 
-    geom_line() + facet_grid(CSR_PORT~., scales = "free_y")
-  print(p1)
-  
-  p2 <- ggplot(dsd, aes(CSR_TIMESTAMP, CSR_FLUX, color = CSR_PORT)) +
-    geom_point(size = 0.2) + scale_y_log10()
-  print(p2)
-  
-  dsd %>% 
-    mutate(CSR_PORT = as.factor(CSR_PORT),
-           Month = month(CSR_TIMESTAMP)) %>% 
-    group_by(CSR_PORT, Month) %>% 
-    summarise(CSR_FLUX = mean(CSR_FLUX)) %>% 
-    ggplot(aes(Month, CSR_FLUX, color = CSR_PORT, group = CSR_PORT)) + 
-    geom_line() ->
-    p3
-  print(p3)
-  # histogram
-  p4 <- ggplot(dsd, aes(x = CSR_FLUX)) + geom_histogram(bins = 30)
-  print(p4)
-}
-```
-
-
-
-
-
-```{r}
-# using dsd data to test day and night Q10 (use one site as an example)
-dsd %>% mutate(CSR_T5 = CSR_TCHAMBER,
-               Year = year(CSR_TIMESTAMP),
-               Month = month(CSR_TIMESTAMP),
-               Day_range = case_when(
-                 day(CSR_TIMESTAMP) %in% 1:5 ~ 1,
-                 day(CSR_TIMESTAMP) %in% 6:10 ~ 2,
-                 day(CSR_TIMESTAMP) %in% 11:15 ~ 3,
-                 day(CSR_TIMESTAMP) %in% 16:20 ~ 4,
-                 day(CSR_TIMESTAMP) %in% 21:25 ~ 5,
-                 TRUE ~ 6
-               ),
-               Day = day(CSR_TIMESTAMP),
-               Hour = hour(CSR_TIMESTAMP),
-               DayNight = case_when (
-                 hour(CSR_TIMESTAMP) >= 19 | hour(CSR_TIMESTAMP) <= 6 ~ "Night",
-                 TRUE ~ "Day" ) ) %>% 
-  # filter (!is.na(dsd$CSR_T5)) %>% 
-  arrange(CSR_PORT,Year,Month,Day) -> dsd
-dsd %>% filter (!is.na(dsd$CSR_T5)) -> dsd
-```
-
-
-```{r}
-dsd %>% filter (Year == 2010 & Month == 3 & Day ==12 & CSR_PORT == 1 & DayNight == 'Day') %>% nrow()
-dsd %>% filter (Year == 2016 & Month == 4 & Day_range ==5 & CSR_PORT == 0 & DayNight == 'Night') %>% nrow()
-```
-
-
-```{r, include=FALSE}
-outputs_ds9 <- DN_Q10 (dsd, var_dataset = var_dataset[i])
-```
-
-
-```{r, fig.width=10, fig.height=4}
-outputs <- outputs_ds9
-outputs %>% filter(!is.na(Q10_day) & !is.na(Q10_night)) -> outputs
-min(outputs$day_TS - outputs$night_TS)
-max(outputs$day_TS - outputs$night_TS)
-mean(outputs$day_TS - outputs$night_TS)
-Q10_DN_Comp (outputs)
-```
-
-
-```{r}
-# night as control and daytime as warm? Time for warm?
-ggplot(outputs) + aes(day_TS - night_TS) + geom_histogram(col = "black", fill = "gray", bins = 30) +
-  geom_vline(xintercept = c(quantile (outputs$day_TS - outputs$night_TS, c(0.025, 0.5, 0.975), na.rm = T)),col = "red", linetype = "dotted", size = 1.5) +
-  facet_wrap(~var_month.j.) +
-  xlab(expression("Day-night T"[S]~"("~degree~C~")"))
-
-ggplot(outputs) + aes(x="all", y=(day_TS - night_TS)) + geom_violin(col = "black", fill = "white", bins = 30) +
-  facet_wrap(~var_month.j.) +
-  geom_jitter(shape=16, position=position_jitter(0.2), col = 'gray') +
-  xlab(expression("Day-night T"[S]~"("~degree~C~")"))
-
-ggplot(outputs) + aes(Q10_day-Q10_night) + geom_histogram(col = "black", fill = "gray", bins = 30) +
-  geom_vline(xintercept = c(quantile (outputs$Q10_day - outputs$Q10_night, c(0.025, 0.5, 0.975), na.rm = T)),col = "red", linetype = "dotted", size = 1.5) +
-  facet_wrap(~var_month.j.) +
-  xlab(expression("Day-night Q"[10]))
-
-ggplot(outputs) + aes(x="all", y=(Q10_day - Q10_night)) + geom_violin(col = "black", fill = "white", bins = 30) +
-  facet_wrap(~var_month.j.) +
-  geom_jitter(shape=16, position=position_jitter(0.2), col = 'gray') +
-  xlab(expression("Day-night T"[S]~"("~degree~C~")"))
-```
-
-```{r}
-min(outputs$day_TS - outputs$night_TS)
-```
-
-
-```{r}
-# test the relationship between Q10 diff and TS differ
-outputs %>% mutate(Q10diff = Q10_day - Q10_night,
-                   STdiff = day_TS - night_TS) %>%
-  filter (STdiff > 0.5) %>%
-  ggplot() +
-  aes(x = STdiff, y = Q10diff) +
-  geom_hex() +
-  scale_fill_gradient(low = "gray", high = "blue") +
-  geom_smooth(method = "lm") +
-  xlab(expression("STday - STnight"~"("~degree~C~")")) +
-  ylab(expression(dayQ[10]~"-"~nightQ[10]))
-
-outputs %>% mutate(Q10diff = Q10_day - Q10_night,
-                   STdiff = day_TS - night_TS) %>%
-  filter (STdiff <= 0.5) %>%
-  ggplot() +
-  aes(x = STdiff, y = Q10diff) +
-  geom_hex() +
-  scale_fill_gradient(low = "gray", high = "blue") +
-  geom_smooth(method = "lm") +
-  xlab(expression("STday - STnight"~"("~degree~C~")")) +
-  ylab(expression(dayQ[10]~"-"~nightQ[10]))
-```
-
-
-```{r}
-# test Q10 differ under different ST differ gradient
-outputs %>% mutate(Q10diff = Q10_day - Q10_night,
-                   STdiff = day_TS - night_TS,
-                   STgradient = case_when ( STdiff < 0.5 ~ "G1",
-                                            TRUE ~ "G2")
-                   ) %>% ggplot () + aes(x=STgradient, y=(Q10diff)) +
-  geom_violin(col = "black", fill = "white") +
-  facet_wrap(~var_month.j.) +
-  geom_jitter(shape=16, position=position_jitter(0.2), col = 'gray') +
-  ylab(expression("Q"[10]~diff))
-```
-
-```{r}
-# test whether SM5 differ in night and day time
-# ggplot (dsd) + aes (x = DayNight, y = CSR_SM5) + 
-#   geom_violin(col = "black", fill = "white") +
-#   facet_wrap(~Month) +
-#   # geom_jitter(shape=16, position=position_jitter(0.2), col = 'gray') +
-#   ylab(expression(SM~"( % )"))
-```
-.
-```{r}
-# compare Rh and Rs: port 1, 3, 5, 7, 9 11, 13, 15 are root exclusion sites
-# outputs %>% mutate(Q10diff = Q10_day - Q10_night,
-#                    RhRs = case_when ( var_port.k. %in% c(1,3,5,7,9,11,13,15) ~ "Rh",
-#                                             TRUE ~ "Rs")
-#                    ) %>% ggplot () + aes(x=RhRs, y=(Q10diff)) +
-#   geom_violin(col = "black", fill = "white") +
-#   facet_wrap(~var_month.j.) +
-#   geom_jitter(shape=16, position=position_jitter(0.2), col = 'gray') +
-#   ylab(expression("Q"[10]~diff))
-```
-
-**Temperature sensitivity**:
-
-```{r tsensitivity}
-tcols <- grep("^CSR_T(CHAMBER|[0-9]+)", names(ds$data))
-if(length(tcols)) {
-  fluxcol <- grep("CSR_FLUX", names(ds$data))
-  results <- list()
-  for(col in tcols) {
-    x <- ds$data[fluxcol]
-    x$Temperature <- pull(ds$data, col)#ds$data[,col]
-    x$Which_temp <- names(ds$data)[col]
-    results[[as.character(col)]] <- x
-  }
-  results <- bind_rows(results)
-  
-  p1 <- ggplot(results, aes(Temperature, CSR_FLUX)) + 
-    geom_point(size = 0.2, alpha = I(0.25)) + 
-    geom_smooth(method = "lm") +
-    facet_wrap(~Which_temp, scales = "free")
-  print(p1)
-}
-```
-
-
