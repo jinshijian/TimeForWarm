@@ -1,0 +1,270 @@
+---
+title: "Time_for_warm_cosore"
+author: "Jinshi"
+date: "6/4/2020"
+output: html_document
+---
+
+* Using cosore data, daytime as warm and night time as control treatment ******************************************************
+```{r}
+# Read cosore dataset
+cosore <- readRDS("other_data/cosore_data.RDS")
+```
+
+
+```{r }
+tibble::glimpse(csr_table(cosore, "description"))
+desc <- csr_table(cosore, "description")
+var_dataset <- desc$CSR_DATASET
+which(var_dataset=='d20190415_VARNER')
+# ds <- cosore$d20190517_MAURITZ # nobs = 2 or 3 if use daily timescale
+```
+
+# `r ds$description$CSR_DATASET`
+```{r}
+# i=2, no CSR_T5 information, using TCHmber?
+i = 9
+var_dataset[i]
+# ds <- cosore$d20190409_ANJILELI
+# cosore[CSR_DATASET == 'd20190517_MAURITZ',]
+ds <- cosore$d20190517_MAURITZ
+tibble::glimpse(ds$description)
+# d <- ds$description
+# diag <- ds$diagnostics
+```
+
+## Site information
+```{r map, echo=FALSE}
+library(sp)
+library(leaflet)
+df <- data.frame(lon = ds$description$CSR_LONGITUDE, lat = ds$description$CSR_LATITUDE)
+coordinates(df) <- ~lon + lat
+leaflet(df) %>% 
+  addMarkers() %>% 
+  addTiles(options = providerTileOptions(minZoom = 3, maxZoom = 3))
+```
+
+## Reference information
+## Contributors
+```{r contrib_table, echo=FALSE}
+knitr::kable(unlist(ds$contributors), format = "html", col.names = c("Value")) %>% 
+  kableExtra::kable_styling(full_width = FALSE, position = "left")
+```
+
+## Measurement information
+**Instrument**: `r d$CSR_INSTRUMENT`
+**File format**: `r d$CSR_FILE_FORMAT`
+**Timestamp format**: `r d$CSR_TIMESTAMP_FORMAT`
+**Timestamp timezone**: `r d$CSR_TIMESTAMP_TZ`
+```{r msmt_table, echo=FALSE}
+knitr::kable(ds$ports, format = "html") %>% 
+  kableExtra::kable_styling(full_width = FALSE, position = "left")
+```
+
+## Column mapping
+```{r mapping, echo=FALSE}
+knitr::kable(ds$columns, format = "html") %>% 
+  kableExtra::kable_styling(full_width = FALSE, position = "left")
+```
+
+## Data processing diagnostics
+Info                |  Value
+------------------- | ----
+Records             | `r diag$CSR_RECORDS`
+Records removed (error)     | `r diag$CSR_RECORDS_REMOVED_ERR`
+Records removed (invalid timestamp)     | `r diag$CSR_RECORDS_REMOVED_TIMESTAMP`
+Records removed (no flux)   | `r diag$CSR_RECORDS_REMOVED_NA`
+Records (flux < `r diag$CSR_FLUX_LOWBOUND`)  | `r diag$CSR_RECORDS_REMOVED_TOOLOW`
+Records (flux > `r diag$CSR_FLUX_HIGHBOUND`) | `r diag$CSR_RECORDS_REMOVED_TOOHIGH`
+Columns dropped     | `r diag$CSR_COLUMNS_DROPPED`
+Bad `Tchamber` values removed | `r diag$CSR_BAD_TCHAMBER`
+Size                | `r format(object.size(ds), "Mb")`
+
+**Flux summary**:
+
+```{r flux-graphs}
+if(is.data.frame(ds$data) & !FALSE) {
+  print(summary(ds$data$CSR_FLUX))
+  
+  dsd <- subset(ds$data, !is.na(CSR_FLUX) & CSR_FLUX > 0)
+  
+  # flux over time
+  p1 <- ggplot(dsd, aes(CSR_TIMESTAMP, CSR_FLUX, color = CSR_PORT)) + 
+    geom_line() + facet_grid(CSR_PORT~., scales = "free_y")
+  print(p1)
+  
+  p2 <- ggplot(dsd, aes(CSR_TIMESTAMP, CSR_FLUX, color = CSR_PORT)) +
+    geom_point(size = 0.2) + scale_y_log10()
+  print(p2)
+  
+  dsd %>% 
+    mutate(CSR_PORT = as.factor(CSR_PORT),
+           Month = month(CSR_TIMESTAMP)) %>% 
+    group_by(CSR_PORT, Month) %>% 
+    summarise(CSR_FLUX = mean(CSR_FLUX)) %>% 
+    ggplot(aes(Month, CSR_FLUX, color = CSR_PORT, group = CSR_PORT)) + 
+    geom_line() ->
+    p3
+  print(p3)
+  # histogram
+  p4 <- ggplot(dsd, aes(x = CSR_FLUX)) + geom_histogram(bins = 30)
+  print(p4)
+}
+```
+
+
+```{r}
+# using dsd data to test day and night Q10 (use one site as an example)
+dsd %>% mutate(CSR_T5 = CSR_TCHAMBER,
+               Year = year(CSR_TIMESTAMP),
+               Month = month(CSR_TIMESTAMP),
+               Day_range = case_when(
+                 day(CSR_TIMESTAMP) %in% 1:5 ~ 1,
+                 day(CSR_TIMESTAMP) %in% 6:10 ~ 2,
+                 day(CSR_TIMESTAMP) %in% 11:15 ~ 3,
+                 day(CSR_TIMESTAMP) %in% 16:20 ~ 4,
+                 day(CSR_TIMESTAMP) %in% 21:25 ~ 5,
+                 TRUE ~ 6
+               ),
+               Day = day(CSR_TIMESTAMP),
+               Hour = hour(CSR_TIMESTAMP),
+               DayNight = case_when (
+                 hour(CSR_TIMESTAMP) >= 19 | hour(CSR_TIMESTAMP) <= 6 ~ "Night",
+                 TRUE ~ "Day" ) ) %>% 
+  # filter (!is.na(dsd$CSR_T5)) %>% 
+  arrange(CSR_PORT,Year,Month,Day) -> dsd
+dsd %>% filter (!is.na(dsd$CSR_T5)) -> dsd
+```
+
+
+```{r}
+dsd %>% filter (Year == 2010 & Month == 3 & Day ==12 & CSR_PORT == 1 & DayNight == 'Day') %>% nrow()
+dsd %>% filter (Year == 2016 & Month == 4 & Day_range ==5 & CSR_PORT == 0 & DayNight == 'Night') %>% nrow()
+```
+
+
+```{r, include=FALSE}
+outputs_ds9 <- DN_Q10 (dsd, var_dataset = var_dataset[i])
+```
+
+
+```{r, fig.width=10, fig.height=4}
+outputs <- outputs_ds9
+outputs %>% filter(!is.na(Q10_day) & !is.na(Q10_night)) -> outputs
+min(outputs$day_TS - outputs$night_TS)
+max(outputs$day_TS - outputs$night_TS)
+mean(outputs$day_TS - outputs$night_TS)
+Q10_DN_Comp (outputs)
+```
+
+
+```{r}
+# night as control and daytime as warm? Time for warm?
+ggplot(outputs) + aes(day_TS - night_TS) + geom_histogram(col = "black", fill = "gray", bins = 30) +
+  geom_vline(xintercept = c(quantile (outputs$day_TS - outputs$night_TS, c(0.025, 0.5, 0.975), na.rm = T)),col = "red", linetype = "dotted", size = 1.5) +
+  facet_wrap(~var_month.j.) +
+  xlab(expression("Day-night T"[S]~"("~degree~C~")"))
+
+ggplot(outputs) + aes(x="all", y=(day_TS - night_TS)) + geom_violin(col = "black", fill = "white", bins = 30) +
+  facet_wrap(~var_month.j.) +
+  geom_jitter(shape=16, position=position_jitter(0.2), col = 'gray') +
+  xlab(expression("Day-night T"[S]~"("~degree~C~")"))
+
+ggplot(outputs) + aes(Q10_day-Q10_night) + geom_histogram(col = "black", fill = "gray", bins = 30) +
+  geom_vline(xintercept = c(quantile (outputs$Q10_day - outputs$Q10_night, c(0.025, 0.5, 0.975), na.rm = T)),col = "red", linetype = "dotted", size = 1.5) +
+  facet_wrap(~var_month.j.) +
+  xlab(expression("Day-night Q"[10]))
+
+ggplot(outputs) + aes(x="all", y=(Q10_day - Q10_night)) + geom_violin(col = "black", fill = "white", bins = 30) +
+  facet_wrap(~var_month.j.) +
+  geom_jitter(shape=16, position=position_jitter(0.2), col = 'gray') +
+  xlab(expression("Day-night T"[S]~"("~degree~C~")"))
+```
+
+
+```{r}
+min(outputs$day_TS - outputs$night_TS)
+```
+
+
+```{r}
+# test the relationship between Q10 diff and TS differ
+outputs %>% mutate(Q10diff = Q10_day - Q10_night,
+                   STdiff = day_TS - night_TS) %>%
+  filter (STdiff > 0.5) %>%
+  ggplot() +
+  aes(x = STdiff, y = Q10diff) +
+  geom_hex() +
+  scale_fill_gradient(low = "gray", high = "blue") +
+  geom_smooth(method = "lm") +
+  xlab(expression("STday - STnight"~"("~degree~C~")")) +
+  ylab(expression(dayQ[10]~"-"~nightQ[10]))
+
+outputs %>% mutate(Q10diff = Q10_day - Q10_night,
+                   STdiff = day_TS - night_TS) %>%
+  filter (STdiff <= 0.5) %>%
+  ggplot() +
+  aes(x = STdiff, y = Q10diff) +
+  geom_hex() +
+  scale_fill_gradient(low = "gray", high = "blue") +
+  geom_smooth(method = "lm") +
+  xlab(expression("STday - STnight"~"("~degree~C~")")) +
+  ylab(expression(dayQ[10]~"-"~nightQ[10]))
+```
+
+
+```{r}
+# test Q10 differ under different ST differ gradient
+outputs %>% mutate(Q10diff = Q10_day - Q10_night,
+                   STdiff = day_TS - night_TS,
+                   STgradient = case_when ( STdiff < 0.5 ~ "G1",
+                                            TRUE ~ "G2")
+                   ) %>% ggplot () + aes(x=STgradient, y=(Q10diff)) +
+  geom_violin(col = "black", fill = "white") +
+  facet_wrap(~var_month.j.) +
+  geom_jitter(shape=16, position=position_jitter(0.2), col = 'gray') +
+  ylab(expression("Q"[10]~diff))
+```
+
+```{r}
+# test whether SM5 differ in night and day time
+# ggplot (dsd) + aes (x = DayNight, y = CSR_SM5) + 
+#   geom_violin(col = "black", fill = "white") +
+#   facet_wrap(~Month) +
+#   # geom_jitter(shape=16, position=position_jitter(0.2), col = 'gray') +
+#   ylab(expression(SM~"( % )"))
+```
+.
+```{r}
+# compare Rh and Rs: port 1, 3, 5, 7, 9 11, 13, 15 are root exclusion sites
+# outputs %>% mutate(Q10diff = Q10_day - Q10_night,
+#                    RhRs = case_when ( var_port.k. %in% c(1,3,5,7,9,11,13,15) ~ "Rh",
+#                                             TRUE ~ "Rs")
+#                    ) %>% ggplot () + aes(x=RhRs, y=(Q10diff)) +
+#   geom_violin(col = "black", fill = "white") +
+#   facet_wrap(~var_month.j.) +
+#   geom_jitter(shape=16, position=position_jitter(0.2), col = 'gray') +
+#   ylab(expression("Q"[10]~diff))
+```
+
+**Temperature sensitivity**:
+```{r tsensitivity}
+tcols <- grep("^CSR_T(CHAMBER|[0-9]+)", names(ds$data))
+if(length(tcols)) {
+  fluxcol <- grep("CSR_FLUX", names(ds$data))
+  results <- list()
+  for(col in tcols) {
+    x <- ds$data[fluxcol]
+    x$Temperature <- pull(ds$data, col)#ds$data[,col]
+    x$Which_temp <- names(ds$data)[col]
+    results[[as.character(col)]] <- x
+  }
+  results <- bind_rows(results)
+  
+  p1 <- ggplot(results, aes(Temperature, CSR_FLUX)) + 
+    geom_point(size = 0.2, alpha = I(0.25)) + 
+    geom_smooth(method = "lm") +
+    facet_wrap(~Which_temp, scales = "free")
+  print(p1)
+}
+```
