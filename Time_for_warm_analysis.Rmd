@@ -38,6 +38,7 @@ PT_Del <- drake::readd(PT_Del)
 MGRsD <- drake::readd(MGRsD)
 MGRsD_Q10 <- drake::readd(MGRsD_Q10)
 longterm <- drake::readd(longterm)
+longterm_tm_del <- drake::readd(longterm_tm_del)
 ```
 
 
@@ -51,33 +52,116 @@ ggplot(PT_Del, aes(Decades,  Tm)) +
   geom_boxplot()+
   facet_wrap(~MiddleClimate, nrow = 2,scales = "free")+ 
   labs(y=expression("Air temperature "*"("*degree~C*")"))
+
+# temperature annomaly time series
+PT_Del %>% 
+  ggplot(aes(Year, Tm_Annomaly)) +
+  geom_bar(stat = "identity", alpha = 0.85, fill = "white", color = "black") +
+  geom_smooth(color = "red", method = "lm", se = FALSE) +
+  geom_smooth(color = "blue", method = "loess", se = FALSE, linetype = 2) +
+  facet_wrap(~MiddleClimate, nrow = 4, scales = "free")
 ```
 
 
 * Wether the Q10 response can be detected in site scale?
 ** using site scale long term Rs measurement (no experiment manipulation, i.e., only control used if have warming, N-addition, CO2 increasing)
 ** using results from Ben's AGU present results?
-```{r}
-n_sample <- c(84,84,84,84,84,53,38,31,19,12,10,10,10,10,10,10,10,10)
-n_study <- c(48,48,48,48,48,31,23,16,7,4,2,2,2,2,2,2,2,2)
+```{r, fig.height = 6, fig.width = 8}
+n_sample <- c(84,84,84,84,84,53,38,31,19,12)
+n_study <- c(48,48,48,48,48,31,23,16,7,4)
 paste0(n_sample,"/",n_study)
   
-sub_longterm <- longterm[,c(1,which(colnames(longterm) == "count"), which(colnames(longterm) == "year1"): which(colnames(longterm) == "year18"))]
+sub_longterm <- longterm[,c(1,which(colnames(longterm) == "count"), which(colnames(longterm) == "year1"): which(colnames(longterm) == "year10"))]
+# temperature anomaly
+sub_longterm_tm <- longterm_tm_del[,c(1,which(colnames(longterm_tm_del) == "count"),
+                                   which(colnames(longterm_tm_del) == "year1"): which(colnames(longterm_tm_del) == "year10"))]
 
+# combine two tables and plot
+bind_rows(
+  sub_longterm_tm %>% 
+    dplyr::select(-StudyID, -count) %>% 
+    tidyr::gather() %>% 
+    separate(key, c("no", "Year"), sep = "year") %>% 
+    mutate(Grp = "(a) Temperature annomaly"),
+
+  sub_longterm %>% 
+    dplyr::select(-StudyID, -count) %>% 
+    tidyr::gather() %>% 
+    separate(key, c("no", "Year"), sep = "year") %>% 
+    mutate(Grp = "(b) Rs annomaly")) %>%
+  dplyr::select(-no) %>% 
+  group_by(Grp, Year) %>% 
+  summarize(value = mean(value, na.rm = TRUE)) %>% 
+  mutate(Year = as.numeric(Year)) %>% 
+  ggplot(aes(Year, value)) +
+  geom_bar(stat = "identity",
+           fill = "gray",
+           col = "gray",
+           width = 0.65) +
+  geom_smooth(method = "lm",
+              se = FALSE,
+              linetype = "dashed",
+              col = "red") +
+  facet_grid(row = vars(Grp),
+             scales = "free") +
+  labs(x = expression("Sample/Study"), 
+       y = expression(R[S]~annomaly~(g~C~m^{2}~yr^{-1}~","~T~annomaly~(degree~C))))+
+  scale_x_continuous(sec.axis=sec_axis(trans=~ ., name="Year after experiment"),
+                     breaks = 1:10,
+                     labels = paste0(n_sample,"/",n_study))
+
+# another way to plot
 sub_longterm %>% 
-  select(-StudyID, -count) %>% 
+  dplyr::select(-StudyID, -count) %>% 
   tidyr::gather() %>% 
   ggplot(aes(key, value)) +
   geom_violin(fill = "skyblue") +
   scale_x_discrete(limits = c("year1","year2","year3","year4","year5","year6",
-                              "year7","year8","year9","year10","year11","year12",
-                              "year13","year14","year15","year16","year17","year18"),
-                   labels = c(1:18)) +
+                              "year7","year8","year9","year10"),
+                   labels = c(1:10)) +
   stat_summary(fun.y=median, geom="point", size=2, color="red") +
   labs(x = expression(Years~since~experiment),
        y = expression(Annual~R[S]~anomaly~(g~C~m^{-2}~yr^{-1}))) +
-  ylim(-500, 1800) +
-  annotate("text", x=1:18, y=1700, label=paste0(n_sample,"/",n_study), angle = 90)
+  ylim(-500, 800) +
+  annotate("text", x=1:10, y=750, label=paste0(n_sample,"/",n_study), angle = 90)
+
+sub_longterm_tm %>% 
+  dplyr::select(-StudyID, -count) %>% 
+  tidyr::gather() %>% 
+  ggplot(aes(key, value)) +
+  geom_violin(fill = "skyblue") +
+  scale_x_discrete(limits = c("year1","year2","year3","year4","year5","year6",
+                              "year7","year8","year9","year10"),
+                   labels = c(1:18)) +
+  stat_summary(fun.y=median, geom="point", size=2, color="red") +
+  labs(x = expression(Years~since~experiment),
+       y = expression(Annual~R[S]~anomaly~(g~C~m^{-2}~yr^{-1}))) 
+
+# mann-kendall test
+bind_rows(
+  sub_longterm_tm %>% 
+    dplyr::select(-StudyID, -count) %>% 
+    tidyr::gather() %>% 
+    separate(key, c("no", "Year"), sep = "year") %>% 
+    mutate(Grp = "(a) Temperature annomaly"),
+
+  sub_longterm %>% 
+    dplyr::select(-StudyID, -count) %>% 
+    tidyr::gather() %>% 
+    separate(key, c("no", "Year"), sep = "year") %>% 
+    mutate(Grp = "(b) Rs annomaly")) %>%
+  dplyr::select(-no) %>% 
+  group_by(Grp, Year) %>% 
+  summarize(value = mean(value, na.rm = TRUE)) %>% 
+  mutate(Year = as.numeric(Year)) %>% 
+  arrange(Grp, Year) -> 
+  longterm_agg
+
+mk_tm <- MannKendall(longterm_agg$value[1:10])
+mk_rs <- MannKendall(longterm_agg$value[11:20])
+
+summary(mk_tm)
+summary(mk_rs)
 ```
 
 
@@ -128,8 +212,8 @@ biome_MLR_srdb (srdb_v4)
 p <- ggplot (MGRsD, aes(Tm, RsLog, colour = Decades))
 p <- p + geom_point(alpha = 0.2, size = 1) + geom_smooth(method = 'lm') +
   facet_wrap(~MiddleClimate, ncol = 2) + 
-  labs( y = expression(ln(Rs)~(g~C~m^{-2}~d^{-1} ))
-       ,x = expression(Air~temperature~(degree~C) ) ) +
+  labs( y = expression(ln(Rs)~(g~C~m^{-2}~d^{-1} )),
+        x = expression(Air~temperature~(degree~C) ) ) +
   theme(legend.position = 'top')
 p
 
@@ -256,13 +340,13 @@ study_exc <- c(6935,4174,3301,3302,3254,3197,6347,4864,3581,5935,
                8534,10066,10483,10564,10910,11366)
 srdb_v5 %>% 
   filter(!is.na(Rs_annual)) %>% 
-  select(Rs_annual, Study_number, YearsOfData) %>% 
+  dplyr::select(Rs_annual, Study_number, YearsOfData) %>% 
   count(Study_number, YearsOfData) %>% 
   filter(YearsOfData>=5 & Study_number %!in% study_exc)
 
 srdb_v5 %>% 
   filter(!is.na(Rs_annual)) %>% 
-  select(Rs_annual, Study_number, Site_ID) %>% 
+  dplyr::select(Rs_annual, Study_number, Site_ID) %>% 
   count(Study_number, Site_ID) %>% 
   filter(Study_number %!in% study_exc) %>% 
   filter(n > 4)
@@ -292,6 +376,7 @@ roling <- ggplot (aes(x1, y1),  data = sub_data) + geom_col() +
 plot_grid(raw_plot, roling, ncol = 2, hjust = c(-3.25, -2.5), vjust = c(2.5, 2.5))
 ```
 
+
 * Each site (at least 5 years continous measurement), Mann-Kendall test was used to detect the trend change
 * tau > 0 means increase trend, tau > 0.184 means significant increase trend
 * tau < 0 means decrease trend, tau < -0.184 means significant decrease trenc
@@ -301,4 +386,14 @@ plot_grid(raw_plot, roling, ncol = 2, hjust = c(-3.25, -2.5), vjust = c(2.5, 2.5
 # Mann-Kendall test for each site and see whether the slope differ from 0
 # longtern_test(longterm)
 # ncol(longterm)
+
+# var_txt <- unlist(
+#   list.files(path = "~/Documents/PNNL/bigdata/UDel/Global2011T_XLS",
+#   pattern = NULL,
+#   all.files = FALSE,
+#   full.names = FALSE,
+#   recursive = TRUE,
+#   ignore.case = FALSE,
+#   include.dirs = FALSE)
+# )
 ```
