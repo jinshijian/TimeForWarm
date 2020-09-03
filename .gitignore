@@ -43,20 +43,16 @@ outputs/
 # OS files
 .DS_Store
 
-# Climate data
-climate_data/
-
-# Paper
-Papers/
 
 # Exclude Rmarkdown caches and images
 *_cache/
 *_files/
 *.html
 
-# Exclude old 
+# Exclude folders 
 old/
 manuscript/
 Papers/
 data/
-
+Papers/
+climate_data/
