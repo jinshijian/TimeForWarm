@@ -1,0 +1,243 @@
+---
+title: "Miscell"
+author: "Jinshi"
+date: "7/13/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+MGRsD_Q10 <- drake::readd(MGRsD_Q10)
+```
+
+
+## code no longer used
+```{r longterm field experiment, fig.height=3, fig.width=8}
+# test first site
+# plot raw data vs rolling mean data
+sub_data <- data.frame(x1 = sub_longterm[, 2], y1 = c(1:length(sub_longterm)))
+raw_plot <- ggplot (aes(x1, y1),  data = sub_data) + geom_col() +
+  scale_x_continuous(breaks = seq(0,25,5)) +
+  labs(x = "Years after 1st Rs measurement", y = expression(Rs_annual~"("~g~C~m^{2}~yr^{-1}~")")) + 
+  ggtitle ("(a) Raw data")
+
+# roling mean by 3
+rolingmean <- movingAverage (y1, 3)
+sub_data <- data.frame(rolingmean[3:length(y1)], 1:length(rolingmean[3:length(y1)]) )
+colnames(sub_data) <- c('y1', 'x1')
+
+# lines(x1, rolingmean, col="green", lwd=2)
+roling <- ggplot (aes(x1, y1),  data = sub_data) + geom_col() + 
+  labs(x = "Years after 1st Rs measurement", y = expression(Rs_annual~"("~g~C~m^{2}~yr^{-1}~")")) +
+  ggtitle("(b) Rolling mean of 3 yrs")
+
+plot_grid(raw_plot, roling, ncol = 2, hjust = c(-3.25, -2.5), vjust = c(2.5, 2.5))
+```
+
+
+* Each site (at least 5 years continous measurement), Mann-Kendall test was used to detect the trend change
+* tau > 0 means increase trend, tau > 0.184 means significant increase trend
+* tau < 0 means decrease trend, tau < -0.184 means significant decrease trenc
+* the results show that overall, there are no trend (tau values not significantly differ from 0)
+```{r}
+# Mann-Kendall test for each site and see whether the slope differ from 0
+# longtern_test(longterm)
+# ncol(longterm)
+
+# var_txt <- unlist(
+#   list.files(path = "~/Documents/PNNL/bigdata/UDel/Global2011T_XLS",
+#   pattern = NULL,
+#   all.files = FALSE,
+#   full.names = FALSE,
+#   recursive = TRUE,
+#   ignore.case = FALSE,
+#   include.dirs = FALSE)
+# )
+```
+
+
+* Same results using data from MGRsD
+* Using Rs data from MGRsD, we analyzed Rs vs. temperature in different biome for 1990s and 2000s
+* How Rs response to temperature change does not shift in 2000s comparing to 1990s in most biome
+```{r}
+# plot Q10
+MGRsD_Q10 <- MGRsD_Q10[MGRsD_Q10$Q10SY <= 10, ]
+max(MGRsD_Q10$p_Q)
+MGRsD_Q10 <- MGRsD_Q10[MGRsD_Q10$p_Q <= 0.1,]
+MGRsD_Q10$Decades <- ifelse (MGRsD_Q10$studyYear <= 2000, '1990s', '2010s')
+mean(MGRsD_Q10$Q10)
+ggplot(data = MGRsD_Q10, aes(Q10SY)) + geom_histogram(fill = 'gray', col = 'black', binwidth = 0.25, alpha = 0.25)
+```
+
+
+* MLR model summary
+```{r}
+sum_MLR <- biome_MLR_MGRsD(MGRsD_sum)
+print(sum_MLR)
+sum_MLR <- biome_MLR_MGRsD(MGRsD)
+```
+
+* using baysian approach?
+```{r, fig.width=8, fig.height=5}
+plot_tfw_sft(srdb_v4, MGRsD_Q10)
+```
+
+# Distribution of Q10 (not significant)
+```{r}
+ggplot(MGRsD_Q10, aes(Q10SY, color = (studyYear>2000), fill = (studyYear>2000)) ) + geom_density(stat = 'density', alpha = 0.25 ) +
+    ggtitle('Q10 from MGRsD: 1990s vs 2000s') +
+    xlab(expression(Q[10])) +
+    theme(legend.position = c(0.75,0.65),
+          legend.background = element_rect(colour = 'transparent',
+                                           fill = alpha('white', 0), size = 0.75) )
+```
+
+```{r}
+# plot by each biome
+var_biome <- sort(unique(MGRsD_Q10$MiddleClimate))
+for(i in 1:length(var_biome)) {
+  MGRsD_Q10_biuome <- MGRsD_Q10[MGRsD_Q10$MiddleClimate == var_biome[i],]
+  p <- ggplot(MGRsD_Q10_biuome, aes(Q10SY, color = (studyYear>2000), fill = (studyYear>2000)) ) + 
+    geom_density(stat = 'density', alpha = 0.25 ) +
+    ggtitle(var_biome[i]) +
+    xlab(expression(Q[10])) +
+    theme(legend.position = c(0.75,0.65),
+          legend.background = element_rect(colour = 'transparent', fill = alpha('white', 0), size = 0.75))
+  print(p)}
+
+```
+
+
+* Wether the Q10 response can be detected in site scale?
+** using site scale long term Rs measurement (no experiment manipulation, i.e., only control used if have warming, N-addition, CO2 increasing)
+** using results from Ben's AGU present results?
+```{r, fig.height = 6, fig.width = 8}
+n_sample <- c(84,84,84,84,84,53,38,31,19,12)
+n_study <- c(48,48,48,48,48,31,23,16,7,4)
+paste0(n_sample,"/",n_study)
+  
+sub_longterm <- longterm[,c(1,which(colnames(longterm) == "count"), which(colnames(longterm) == "year1"): which(colnames(longterm) == "year10"))]
+# temperature anomaly
+sub_longterm_tm <- longterm_tm_del[,c(1,which(colnames(longterm_tm_del) == "count"),
+                                   which(colnames(longterm_tm_del) == "year1"): which(colnames(longterm_tm_del) == "year10"))]
+
+# combine two tables and plot
+bind_rows(
+  sub_longterm_tm %>% 
+    dplyr::select(-StudyID, -count) %>% 
+    tidyr::gather() %>% 
+    tidyr::separate(key, c("no", "Year"), sep = "year") %>% 
+    mutate(Grp = "(a) Temperature annomaly"),
+
+  sub_longterm %>% 
+    dplyr::select(-StudyID, -count) %>% 
+    tidyr::gather() %>% 
+    tidyr::separate(key, c("no", "Year"), sep = "year") %>% 
+    mutate(Grp = "(b) Rs annomaly")) %>%
+  dplyr::select(-no) %>% 
+  group_by(Grp, Year) %>% 
+  summarize(value = mean(value, na.rm = TRUE)) %>% 
+  mutate(Year = as.numeric(Year)) %>% 
+  ggplot(aes(Year, value)) +
+  geom_bar(stat = "identity",
+           fill = "gray",
+           col = "gray",
+           width = 0.65) +
+  geom_smooth(method = "lm",
+              se = FALSE,
+              linetype = "dashed",
+              col = "red") +
+  facet_grid(row = vars(Grp),
+             scales = "free") +
+  labs(x = expression("Sample/Study"), 
+       y = expression(R[S]~annomaly~(g~C~m^{2}~yr^{-1}~","~T~annomaly~(degree~C))))+
+  scale_x_continuous(sec.axis=sec_axis(trans=~ ., name="Year after experiment"),
+                     breaks = 1:10,
+                     labels = paste0(n_sample,"/",n_study))
+
+# another way to plot
+sub_longterm %>% 
+  dplyr::select(-StudyID, -count) %>% 
+  tidyr::gather() %>% 
+  ggplot(aes(key, value)) +
+  geom_violin(fill = "skyblue") +
+  scale_x_discrete(limits = c("year1","year2","year3","year4","year5","year6",
+                              "year7","year8","year9","year10"),
+                   labels = c(1:10)) +
+  stat_summary(fun.y=median, geom="point", size=2, color="red") +
+  labs(x = expression(Years~since~experiment),
+       y = expression(Annual~R[S]~anomaly~(g~C~m^{-2}~yr^{-1}))) +
+  ylim(-500, 800) +
+  annotate("text", x=1:10, y=750, label=paste0(n_sample,"/",n_study), angle = 90)
+
+sub_longterm_tm %>% 
+  dplyr::select(-StudyID, -count) %>% 
+  tidyr::gather() %>% 
+  ggplot(aes(key, value)) +
+  geom_violin(fill = "skyblue") +
+  scale_x_discrete(limits = c("year1","year2","year3","year4","year5","year6",
+                              "year7","year8","year9","year10"),
+                   labels = c(1:18)) +
+  stat_summary(fun.y=median, geom="point", size=2, color="red") +
+  labs(x = expression(Years~since~experiment),
+       y = expression(Annual~R[S]~anomaly~(g~C~m^{-2}~yr^{-1}))) 
+
+# mann-kendall test
+bind_rows(
+  sub_longterm_tm %>% 
+    dplyr::select(-StudyID, -count) %>% 
+    tidyr::gather() %>% 
+    tidyr::separate(key, c("no", "Year"), sep = "year") %>% 
+    mutate(Grp = "(a) Temperature annomaly"),
+
+  sub_longterm %>% 
+    dplyr::select(-StudyID, -count) %>% 
+    tidyr::gather() %>% 
+    tidyr::separate(key, c("no", "Year"), sep = "year") %>% 
+    mutate(Grp = "(b) Rs annomaly")) %>%
+  dplyr::select(-no) %>% 
+  group_by(Grp, Year) %>% 
+  summarize(value = mean(value, na.rm = TRUE)) %>% 
+  mutate(Year = as.numeric(Year)) %>% 
+  arrange(Grp, Year) -> 
+  longterm_agg
+
+mk_tm <- MannKendall(longterm_agg$value[1:10])
+mk_rs <- MannKendall(longterm_agg$value[11:20])
+
+summary(mk_tm)
+summary(mk_rs)
+```
+
+
+```{r}
+# test Q10 by Biome
+srdb_sub <- filtration (srdb_v4, 'Q10_all')
+var_filt <- sort(unique(srdb_sub$Biome))
+# var_filt <- var_filt[c(-3, -4, -6)]
+for (i in 1:length(var_filt)) {
+  srdb_biome <- srdb_sub[srdb_sub$Biome == var_filt[i], ]
+  Q10_1 <- Q10_early_late (srdb_biome, 'Q10_0_10', paste0(var_filt[i]," (0-10cm)"))
+  print(Q10_1)
+}
+```
+
+```{r}
+# test R10 by biome
+srdb_sub <- filtration (srdb_v4, 'R10')
+var_filt <- sort(unique(srdb_sub$Biome))
+# var_filt <- var_filt[c(-3, -4, -6)]
+for (i in 1:length(var_filt)) {
+  srdb_biome <- srdb_sub[srdb_sub$Biome == var_filt[i], ]
+  R10_early_late (srdb_biome, 'R10', var_filt[i])
+}
+```
+
+* How soil respiration response to precipitation change?
+* Q10 vs PDSI regression
+* Results show that there are no singificant relationship between Q10 and drought (indentified by PDSI)
+```{r}
+Q10_pdsi(srdb_v4)
+```
+
+

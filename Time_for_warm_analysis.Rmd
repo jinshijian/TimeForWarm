@@ -22,306 +22,175 @@ library(reshape)
 # install.packages('Kendall')
 library(zoo)
 library(Kendall)
-# library(cosore)
 library(dplyr)
+library(tidyr)
+library(lubridate)
+library(maps)
+library(mapdata)
+# devtools::install_github("bpbond/cosore")
+library(cosore)
 library(lubridate)
 # Source all needed functions
 source('Rcode/functions.R')
+source('Rcode/functions_for_cosore.R')
+# Much of this was presented at AGU 2018
+library(readr)
+library(lattice)
+library(mblm)  # for Theil-Sen robust trend test
+library(grid)
+library(hexbin)
 ```
 
 
 ```{r}
+DATA_DIR <- 'data'
+plot_dir <- "outputs/agu_slides/"
 # get data
 srdb_v4 <- drake::readd(srdb_v4) 
+srdb_v4$Decades <- ifelse (srdb_v4$Year <= 2005, '1990s', '2010s')
 srdb_v5 <- drake::readd(srdb_v5)
 PT_Del <- drake::readd(PT_Del)
+PT_Del$Decades <- ifelse (PT_Del$Year <= 2005, 'Early', 'Later')
 MGRsD <- drake::readd(MGRsD)
-MGRsD_Q10 <- drake::readd(MGRsD_Q10)
+MGRsD %>% 
+  filter(Rs_Norm > 0 & !is.na(Rs_Norm) & !is.na(MiddleClimate)) %>% 
+  mutate(RsLog = log(Rs_Norm)) ->
+  MGRsD
+MGRsD_q10 <- drake::readd(MGRsD_q10)
 longterm <- drake::readd(longterm)
-longterm_tm_del <- drake::readd(longterm_tm_del)
+longterm_Tm <- drake::readd(longterm_Tm)
+# longterm_tm_del <- drake::readd(longterm_tm_del)
+# longterm_tm_del <- read_file('LongTerm_tm_del.csv')
+IGBP <- read.csv("~/Documents/PNNL/SoilRespirationPartitioning/data/IGBP_Koppen_MODIS.csv")
+left_join(srdb_v4, IGBP, by = c("Lat_Round" = "Latitude", "Long_Round" = "Longitude")) ->
+  srdb_v4
+
+srdb_v4 %>% 
+  dplyr::select(Q10_all, MiddleClimate) %>% 
+  filter(Q10_all < 10) %>% 
+  na.omit() %>% 
+  group_by (MiddleClimate) %>% 
+  summarise(Q10_mean = mean(Q10_all), obs = n(), se = sd(Q10_all)/sqrt(obs)) ->
+  srdb_v4_agg
+
+# cosore data
+cosore_all <- drake::readd(cosore_all)
+cosore_q10 <- drake::readd(corsore_q10)
+
 ```
 
 
-* We compared mean annual air temperature bwtween 1964 and 2000 (1990s) vs. mean air temperature between 2001 and 2017 (2000s)
-* Air temperature of 1990s (1964-2000) are about 0.5 C lower than that from 2000s(2001-2017)
-* In boreal and polar regions, the temperature difference is bigger (difference ~~ 1 C)
-* Therefore, 1990s are treated as control, 2000s are treated as warming period
+
 ```{r}
-# temperature of 1990s vs 2010s
-ggplot(PT_Del, aes(Decades,  Tm)) +   
-  geom_boxplot()+
-  facet_wrap(~MiddleClimate, nrow = 2,scales = "free")+ 
-  labs(y=expression("Air temperature "*"("*degree~C*")"))
+# test calculate Q10
+Q10_test_data <- tibble(CSR_TS = c(1:20),
+                        Rh = 0.5*exp(log(2)/10*CSR_TS),
+                        Rh_log = log(Rh))
 
-# temperature annomaly time series
-PT_Del %>% 
-  ggplot(aes(Year, Tm_Annomaly)) +
-  geom_bar(stat = "identity", alpha = 0.85, fill = "white", color = "black") +
-  geom_smooth(color = "red", method = "lm", se = FALSE) +
-  geom_smooth(color = "blue", method = "loess", se = FALSE, linetype = 2) +
-  facet_wrap(~MiddleClimate, nrow = 4, scales = "free")
+csr_rh_Q10(Q10_test_data)
+
+csr_database()$CSR_DATASET
+csr_dataset("d20190526_PENNINGTON")
 ```
 
 
-* Wether the Q10 response can be detected in site scale?
-** using site scale long term Rs measurement (no experiment manipulation, i.e., only control used if have warming, N-addition, CO2 increasing)
-** using results from Ben's AGU present results?
-```{r, fig.height = 6, fig.width = 8}
-n_sample <- c(84,84,84,84,84,53,38,31,19,12)
-n_study <- c(48,48,48,48,48,31,23,16,7,4)
-paste0(n_sample,"/",n_study)
-  
-sub_longterm <- longterm[,c(1,which(colnames(longterm) == "count"), which(colnames(longterm) == "year1"): which(colnames(longterm) == "year10"))]
-# temperature anomaly
-sub_longterm_tm <- longterm_tm_del[,c(1,which(colnames(longterm_tm_del) == "count"),
-                                   which(colnames(longterm_tm_del) == "year1"): which(colnames(longterm_tm_del) == "year10"))]
+```{r}
+colnames(cosore_q10)[2] <- "ID"
 
-# combine two tables and plot
 bind_rows(
-  sub_longterm_tm %>% 
-    dplyr::select(-StudyID, -count) %>% 
-    tidyr::gather() %>% 
-    separate(key, c("no", "Year"), sep = "year") %>% 
-    mutate(Grp = "(a) Temperature annomaly"),
+  cosore_q10 %>% 
+    separate(ID, c("dset", "extra"), "-", extra = "merge") %>% 
+    filter(Q10_day < 10 & Q10_night < 10) %>% 
+    mutate(Q10_dif = Q10_day - Q10_night,
+           ST_dif = m_ts_day - m_ts_night,
+           SM_dif = m_sm_day - m_sm_night) %>% 
+    filter(Q10_dif > -2.5 & Q10_dif < 2.5) %>% 
+    filter(ST_dif > 0.5) %>% 
+    mutate(data = "Ts (day) > Ts (night)"),
+  cosore_q10 %>% 
+    separate(ID, c("dset", "extra"), "-", extra = "merge") %>% 
+    filter(Q10_day < 10 & Q10_night < 10) %>% 
+    mutate(Q10_dif = Q10_day - Q10_night,
+           ST_dif = m_ts_day - m_ts_night,
+           SM_dif = m_sm_day - m_sm_night) %>% 
+    filter(Q10_dif > -2.5 & Q10_dif < 2.5) %>% 
+    filter(ST_dif < -0.5) %>% 
+    mutate(data = "Ts (day) < Ts (night)")) %>% 
+  dplyr::select(dset, data, Q10_dif, ST_dif, SM_dif) %>% 
+  filter(dset %!in% c("dset3", "dset6")) %>% 
+  mutate(dset = factor(dset, levels=c("dset1", "dset2", "dset4", "dset5", "dset7", "dset8", "dset9", "dset10", "dset11", "dset12"))) ->
+  cosore_q10_dn
 
-  sub_longterm %>% 
-    dplyr::select(-StudyID, -count) %>% 
-    tidyr::gather() %>% 
-    separate(key, c("no", "Year"), sep = "year") %>% 
-    mutate(Grp = "(b) Rs annomaly")) %>%
-  dplyr::select(-no) %>% 
-  group_by(Grp, Year) %>% 
-  summarize(value = mean(value, na.rm = TRUE)) %>% 
-  mutate(Year = as.numeric(Year)) %>% 
-  ggplot(aes(Year, value)) +
-  geom_bar(stat = "identity",
-           fill = "gray",
-           col = "gray",
-           width = 0.65) +
-  geom_smooth(method = "lm",
-              se = FALSE,
-              linetype = "dashed",
-              col = "red") +
-  facet_grid(row = vars(Grp),
-             scales = "free") +
-  labs(x = expression("Sample/Study"), 
-       y = expression(R[S]~annomaly~(g~C~m^{2}~yr^{-1}~","~T~annomaly~(degree~C))))+
-  scale_x_continuous(sec.axis=sec_axis(trans=~ ., name="Year after experiment"),
-                     breaks = 1:10,
-                     labels = paste0(n_sample,"/",n_study))
+cosore_q10_dn[cosore_q10_dn$dset == "dset5",] #dset5 in unit of %, need to scale it back
+cosore_q10_dn[cosore_q10_dn$dset == "dset5",]$SM_dif <- cosore_q10_dn[cosore_q10_dn$dset == "dset5",]$SM_dif/100
+cosore_q10_dn$SM_dif = cosore_q10_dn$SM_dif * 100 #change all to in unit of %
 
-# another way to plot
-sub_longterm %>% 
-  dplyr::select(-StudyID, -count) %>% 
-  tidyr::gather() %>% 
-  ggplot(aes(key, value)) +
-  geom_violin(fill = "skyblue") +
-  scale_x_discrete(limits = c("year1","year2","year3","year4","year5","year6",
-                              "year7","year8","year9","year10"),
-                   labels = c(1:10)) +
-  stat_summary(fun.y=median, geom="point", size=2, color="red") +
-  labs(x = expression(Years~since~experiment),
-       y = expression(Annual~R[S]~anomaly~(g~C~m^{-2}~yr^{-1}))) +
-  ylim(-500, 800) +
-  annotate("text", x=1:10, y=750, label=paste0(n_sample,"/",n_study), angle = 90)
-
-sub_longterm_tm %>% 
-  dplyr::select(-StudyID, -count) %>% 
-  tidyr::gather() %>% 
-  ggplot(aes(key, value)) +
-  geom_violin(fill = "skyblue") +
-  scale_x_discrete(limits = c("year1","year2","year3","year4","year5","year6",
-                              "year7","year8","year9","year10"),
-                   labels = c(1:18)) +
-  stat_summary(fun.y=median, geom="point", size=2, color="red") +
-  labs(x = expression(Years~since~experiment),
-       y = expression(Annual~R[S]~anomaly~(g~C~m^{-2}~yr^{-1}))) 
-
-# mann-kendall test
-bind_rows(
-  sub_longterm_tm %>% 
-    dplyr::select(-StudyID, -count) %>% 
-    tidyr::gather() %>% 
-    separate(key, c("no", "Year"), sep = "year") %>% 
-    mutate(Grp = "(a) Temperature annomaly"),
-
-  sub_longterm %>% 
-    dplyr::select(-StudyID, -count) %>% 
-    tidyr::gather() %>% 
-    separate(key, c("no", "Year"), sep = "year") %>% 
-    mutate(Grp = "(b) Rs annomaly")) %>%
-  dplyr::select(-no) %>% 
-  group_by(Grp, Year) %>% 
-  summarize(value = mean(value, na.rm = TRUE)) %>% 
-  mutate(Year = as.numeric(Year)) %>% 
-  arrange(Grp, Year) -> 
-  longterm_agg
-
-mk_tm <- MannKendall(longterm_agg$value[1:10])
-mk_rs <- MannKendall(longterm_agg$value[11:20])
-
-summary(mk_tm)
-summary(mk_rs)
+cosore_q10_dn %>% 
+  gather(-dset, -data, key = "Factors", value = "dif") %>% 
+  ggplot(aes(dset, dif, fill = dset)) +
+  geom_violin() +
+  geom_hline(yintercept = 0, linetype = 2, col = "red") +
+  facet_grid(cols = vars(data), rows = vars(Factors), scales = "free") 
+ 
 ```
 
-
-```{r}
-# plot Q10
-MGRsD_Q10 <- MGRsD_Q10[MGRsD_Q10$Q10SY <= 10, ]
-max(MGRsD_Q10$p_Q)
-MGRsD_Q10 <- MGRsD_Q10[MGRsD_Q10$p_Q <= 0.1,]
-MGRsD_Q10$Decades <- ifelse (MGRsD_Q10$studyYear <= 2000, '1990s', '2010s')
-mean(MGRsD_Q10$Q10)
-ggplot(data = MGRsD_Q10, aes(Q10SY)) + geom_histogram(fill = 'gray', col = 'black', binwidth = 0.25, alpha = 0.25)
-```
-
-* We used data from both srdb_v4 and MGRsD 
-
-* For data from MGRsD, only sites with more than 7 months' Rs measurements were used
-* For each sites, we simulate the ewlationshio between Rs and Tm (air temperature) with Rs=axexp^bxTm
-* According to parameter b, we can calculate Q10=exp(b*10) 
-
-* Q10 does not show a clear trend when changing from warm biome to cold biome (negative relationship between Q10 and annual mean temperature, Space for time)
-* Q10 of 1990s does not signifficantly differ from Q10 of 2010s (Time for warming, panel b and d represent data from srdb_v4 and MGRsD respectively)
-
-```{r, fig.width=8, fig.height=5}
-plot_tfw_sft(srdb_v4, MGRsD_Q10)
-```
-
-* Why we see a clear Q10 decrease as annual temperature decrease, but cannot see the difference between 1990s and 2000s?
-* (1) The temperature change is small, the soil respiration response (Q10) is too small to detect.
-* (2) Hypothesis: some sites Q10 increase, site sites Q10 decrease, depend on ... ...
-* As we seperate by biome region, we do see Q10 increased in arctic and boreal, but no change in other regions.
-```{r, fig.height=7, fig.width=8}
-# Q10 of 2010s and 1990s by biome 
-srdb_Q10_biome(srdb_v4)
-```
-
-```{r}
-biome_MLR_srdb (srdb_v4)
-```
-
-
-* Same results using data from MGRsD
-* Using Rs data from MGRsD, we analyzed Rs vs. temperature in different biome for 1990s and 2000s
-* How Rs response to temperature change does not shift in 2000s comparing to 1990s in most biome
-
-```{r, fig.height=8, fig.width=8}
-
-# use ggplot
-p <- ggplot (MGRsD, aes(Tm, RsLog, colour = Decades))
-p <- p + geom_point(alpha = 0.2, size = 1) + geom_smooth(method = 'lm') +
-  facet_wrap(~MiddleClimate, ncol = 2) + 
-  labs( y = expression(ln(Rs)~(g~C~m^{-2}~d^{-1} )),
-        x = expression(Air~temperature~(degree~C) ) ) +
-  theme(legend.position = 'top')
-p
-
-```
-
-* using baysian approach?
-
-```{r}
-sum_MLR <- biome_MLR_MGRsD(MGRsD)
-print(sum_MLR)
-```
-
-```{r}
-srdb_biome_comparisom (srdb_v4)
-```
-
-
-
-# Distribution of Q10 (not significant)
-```{r}
-ggplot(MGRsD_Q10, aes(Q10SY, color = (studyYear>2000), fill = (studyYear>2000)) ) + geom_density(stat = 'density', alpha = 0.25 ) +
-    ggtitle('Q10 from MGRsD: 1990s vs 2000s') +
-    xlab(expression(Q[10])) +
-    theme(legend.position = c(0.75,0.65), legend.background = element_rect(colour = 'transparent', fill = alpha('white', 0), size = 0.75) )
-```
-
-```{r}
-# plot by each biome
-var_biome <- sort(unique(MGRsD_Q10$MiddleClimate))
-for(i in 1:length(var_biome)) {
-  MGRsD_Q10_biuome <- MGRsD_Q10[MGRsD_Q10$MiddleClimate == var_biome[i],]
-  p <- ggplot(MGRsD_Q10_biuome, aes(Q10SY, color = (studyYear>2000), fill = (studyYear>2000)) ) + 
-    geom_density(stat = 'density', alpha = 0.25 ) +
-    ggtitle(var_biome[i]) +
-    xlab(expression(Q[10])) +
-    theme(legend.position = c(0.75,0.65), legend.background = element_rect(colour = 'transparent', fill = alpha('white', 0), size = 0.75))
+```{r, fig.width=8, fig.height=7}
+cosore_q10_dn %>% 
+  ggplot(aes(dset, Q10_dif, fill = dset)) +
+  geom_violin(draw_quantiles = c(0.25, 0.5, 0.75)) +
+  geom_hline(yintercept = 0, linetype = 2, col = "red") +
+  facet_grid(cols = vars(data)) +
+  labs(y = expression(Day - night~Q[10])) +
+  theme(axis.title.x = element_blank(),
+        axis.ticks = element_blank(),
+        axis.text.x = element_blank(),
+        legend.position = "none",
+        axis.title.y = element_text(margin = margin(t = 0, r = 10, b = 0, l = 0))) ->
+  plot_q10_dif
   
-  print(p)
-  }
 
+cosore_q10_dn %>% 
+  ggplot(aes(dset, ST_dif, fill = dset)) +
+  geom_boxplot(outlier.size=-1) +
+  geom_hline(yintercept = 0, linetype = 2, col = "red") +
+  facet_grid(cols = vars(data)) +
+  labs(y = expression(Day - night~T[soil]~(degree~C))) +
+  theme(axis.title.x = element_blank(),
+        axis.ticks = element_blank(),
+        axis.text.x = element_blank(),
+        legend.position = "none") ->
+  plot_ts_dif
+
+cosore_q10_dn %>% 
+  ggplot(aes(dset, SM_dif, fill = dset)) +
+  geom_boxplot(outlier.size=-1) +
+  geom_hline(yintercept = 0, linetype = 2, col = "red") +
+  facet_grid(cols = vars(data)) +
+  labs(x = "Data set",
+       y = expression(Day - night~SM~('%'))) +
+  scale_y_continuous(limits = c(-1.5, 1.5)) +
+  scale_x_discrete(labels=c("dset1" = "ds1",
+                            "dset2" = "ds2",
+                            "dset4" = "ds3",
+                            "dset5" = "ds4",
+                            "dset7" = "ds5",
+                            "dset8" = "ds6",
+                            "dset9" = "ds7",
+                            "dset10" = "ds8",
+                            "dset11" = "ds9",
+                            "dset12" = "ds10")) +
+  theme(legend.position = "none") ->
+  plot_sm_dif
+
+plot_grid(plot_q10_dif, plot_ts_dif, plot_sm_dif,
+          labels = c("a", "b", "c"),
+          rel_heights = c(1,1,1.2),
+          ncol = 1)
 ```
 
 
-* Using SRDB_V4 (Q10 from soil temperature, Q10 are directly collected from publication)
-
-```{r Q10 test, fig.height=6, fig.width=8}
-# compare Q10 of 1961-1990 (30 years) vs 1991-2014
-# colnames(srdb_v4)
-Q10_1 <- Q10_early_late (srdb_v4, 'Q10_0_10', ' A (0-10 cm) ')
-Q10_2 <- Q10_early_late (srdb_v4, 'Q10_5_15', ' B (5-15 cm) ')
-Q10_3 <- Q10_early_late (srdb_v4, 'Q10_10_20', ' C (10-20 cm) ')
-Q10_4 <- Q10_early_late (srdb_v4, 'Q10_0_20', ' D (0-20 cm) ')
-
-plot_grid (Q10_1, Q10_2, Q10_3, Q10_4, ncol = 2)  
-
-```
-
-```{r R10 test}
-# test Q10 under Ra and Rh dominant sites
-R10_early_late (srdb_v4, 'R10', 'Test R10 for early and late years')
-
-```
-
-
-```{r}
-# test Q10 by Biome
-srdb_sub <- filtration (srdb_v4, 'Q10_0_10')
-var_filt <- sort(unique(srdb_sub$Biome))
-var_filt <- var_filt[c(-3, -4, -6)]
-for (i in 1:length(var_filt)) {
-  srdb_biome <- srdb_sub[srdb_sub$Biome == var_filt[i], ]
-  Q10_1 <- Q10_early_late (srdb_biome, 'Q10_0_10', paste0(var_filt[i]," (0-10cm)"))
-  print(Q10_1)
-}
-```
-
-
-
-```{r}
-# test R10 by biome
-srdb_sub <- filtration (srdb_v4, 'R10')
-var_filt <- sort(unique(srdb_sub$Biome))
-# var_filt <- var_filt[c(-3, -4, -6)]
-for (i in 1:length(var_filt)) {
-  srdb_biome <- srdb_sub[srdb_sub$Biome == var_filt[i], ]
-  R10_early_late (srdb_biome, 'R10', var_filt[i])
-}
-```
-
-
-
-
-
-
-* How soil respiration response to precipitation change?
-* Q10 vs PDSI regression
-* Results show that there are no singificant relationship between Q10 and drought (indentified by PDSI)
-```{r}
-Q10_pdsi(srdb_v4)
-```
-
-* Using SPI to detect temporal trend of precipitation?
-* And then see whether Q10 values have relationship with SPI trend?
-* Q10 vs SPI tau values ?
-* First, need get global MK test and get tau value for each site
-* Second, see how Q10 differ among different tau range () ?
-
-```{r}
+## Find long term (n>5) studies from srdb-v5
+```{r find out longterm studies from srdb}
 # get study number from srdb_v5 which have more than 5 years of Rs measurement
 # 10977 can be read from the fiture
 study_exc <- c(6935,4174,3301,3302,3254,3197,6347,4864,3581,5935,
@@ -352,48 +221,854 @@ srdb_v5 %>%
   filter(n > 4)
 ```
 
+## Plot long term sites spatial distribution
+```{r site map, fig.height = 4, fig.width = 8}
+# plot a site map for the long term data collected
+# Step 2: Plot
+# sort(unique(counties$region))
+csr_database() %>% 
+    filter(grepl('Rh', CSR_MSMT_VAR)) %>% 
+    mutate(Latitude = CSR_LATITUDE,
+           Longitude = CSR_LONGITUDE,
+           count = year(CSR_DATE_END) - year(CSR_DATE_BEGIN),
+           Data = "COSORE") %>% 
+    select(Latitude, Longitude, count, Data) ->
+  csr_rh_site
 
-## code no longer used
-```{r longterm field experiment, fig.height=3, fig.width=8}
-# test first site
-# plot raw data vs rolling mean data
-sub_data <- data.frame(x1 = sub_longterm[, 2], y1 = c(1:length(sub_longterm)))
-raw_plot <- ggplot (aes(x1, y1),  data = sub_data) + geom_col() +
-  scale_x_continuous(breaks = seq(0,25,5)) +
-  labs(x = "Years after 1st Rs measurement", y = expression(Rs_annual~"("~g~C~m^{2}~yr^{-1}~")")) + 
-  ggtitle ("(a) Raw data")
+bind_rows(
+  MGRsD %>% 
+    filter(!is.na(Rs_Norm)) %>% 
+    select(Latitude, Longitude, Meas_Year, Study_number) %>% 
+    unique() %>% 
+    group_by(Latitude, Longitude) %>% 
+    summarise(count = n()) %>% 
+    select(Latitude, Longitude, count) %>% 
+    mutate(Data = "DGRsD"),
+  
+  srdb_v4 %>% 
+    filter(!is.na(Q10_all) & !is.na(Latitude)) %>% 
+    mutate(Meas_Year = Study_midyear) %>% 
+    select(Latitude, Longitude, Meas_Year, Study_number) %>% 
+    unique() %>% 
+    group_by(Latitude, Longitude) %>% 
+    summarise(count = n()) %>% 
+    select(Latitude, Longitude, count) %>% 
+    mutate(Data = "SRDB"),
+  
+  csr_rh_site,
+  
+  longterm %>% 
+    select(Latitude, Longitude, count) %>% 
+    mutate(Data = "Long-term")) ->
+  map_sites
 
-# roling mean by 3
-rolingmean <- movingAverage (y1, 3)
-sub_data <- data.frame(rolingmean[3:length(y1)], 1:length(rolingmean[3:length(y1)]) )
-colnames(sub_data) <- c('y1', 'x1')
 
-# lines(x1, rolingmean, col="green", lwd=2)
-roling <- ggplot (aes(x1, y1),  data = sub_data) + geom_col() + 
-  labs(x = "Years after 1st Rs measurement", y = expression(Rs_annual~"("~g~C~m^{2}~yr^{-1}~")")) +
-  ggtitle("(b) Rolling mean of 3 yrs")
-
-plot_grid(raw_plot, roling, ncol = 2, hjust = c(-3.25, -2.5), vjust = c(2.5, 2.5))
+ggplot(data = map_data("world", region = ".", exact = FALSE)) + 
+  geom_polygon(aes(x = long, y = lat, group = group),
+               color = "white", fill = 'gray') + 
+  guides(fill=FALSE) +
+  geom_point(data = map_sites,
+             aes(x=Longitude, y=Latitude,
+                 size = count,
+                 col = Data,
+                 shape = Data),
+             stroke = 1,
+             alpha = 0.75) +
+  geom_point(data = csr_rh_site,
+    aes(x=Longitude, y=Latitude, size = count),
+    col = "#F8766D", alpha = 0.75) +
+  scale_shape_manual(values = c(16, 17, 1, 4)) +
+  scale_x_continuous(name="Longitude", breaks=seq(-180,180, 60),labels = seq(-180,180, 60))+
+  scale_y_continuous(limits = c(-60, 90),name="Latitude", breaks=seq(-60,90,30),labels = seq(-60,90,30)) +
+  scale_size_continuous(name = "Years (n)") +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())
 ```
 
+```{r, fig.height=6, fig.width=6}
+# get the percentage of early period to total
+early_perc <- function(var_year) {
+  MGRsD %>% 
+    select(Meas_Year, Rs_Norm) %>% 
+    na.omit() %>% 
+    filter(Meas_Year <= var_year) %>% 
+    nrow() ->
+    output
+  return (output)
+}
 
-* Each site (at least 5 years continous measurement), Mann-Kendall test was used to detect the trend change
-* tau > 0 means increase trend, tau > 0.184 means significant increase trend
-* tau < 0 means decrease trend, tau < -0.184 means significant decrease trenc
-* the results show that overall, there are no trend (tau values not significantly differ from 0)
-* also using long term SOC data do the same test?
+MGRsD %>% 
+  select(Meas_Year, Rs_Norm) %>% 
+  na.omit() %>% 
+  # group_by(Meas_Year) %>% 
+  # summarise(obs = n(), Rs_mean = mean(Rs_Norm), Rs_sd = sd(Rs_Norm)) %>% 
+  ggplot(aes(x = Meas_Year, y = Rs_Norm)) +
+  geom_hex(col = "gray", bins = 35) +
+  scale_fill_distiller(palette = "YlGnBu", name = "Count", direction = -1) +
+  scale_x_continuous(breaks=seq(1960, 2017, 10)) +
+  theme(axis.title.x = element_blank(),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        legend.position = c(0.25, 0.70)) +
+  labs(y = expression(R[S]~(g~C~m^{-2}~day^{-1}))) ->
+  panel_a
+
+# 1990 - 2009
+tibble(ct_start = rep(1961, 20), ct_end = c(2009:1990),
+       wm_start = c(2010:1991), wm_end = rep(2017, 20)) ->
+  arrow_data
+
+tibble(year = c(1960:2017), intc = runif(58, min=0, max=21)) %>% 
+  ggplot(aes(x = year, y = intc)) +
+  geom_segment(aes(x = ct_start, y = c(1:20), xend = ct_end, yend = c(1:20)),
+               arrow = arrow(length = unit(0.25, "cm")),
+               size = 0.25,
+               col = "blue",
+               data = arrow_data) +
+  geom_segment(aes(x = wm_start, y = c(1:20), xend = wm_end, yend = c(1:20)),
+               arrow = arrow(length = unit(0.25, "cm")),
+               size = 0.25,
+               col = "red",
+               data = arrow_data) +
+  # make 50% bold
+  geom_segment(aes(x = 1961, y = 5, xend = 2005, yend = 5),
+               arrow = arrow(length = unit(0.25, "cm")),
+               size = 0.5,
+               col = "blue") +
+  geom_segment(aes(x = 2006, y = 5, xend = 2017, yend = 5),
+               arrow = arrow(length = unit(0.25, "cm")),
+               size = 0.5,
+               col = "red") +
+  scale_x_continuous(breaks=seq(1960, 2017, 10)) +
+  theme(axis.title.x = element_blank(),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank()) +
+  scale_y_continuous(breaks = c(1, 5, 10, 15, 20),
+                     labels = c(round(early_perc(2009)/36165*100),
+                                round(early_perc(2005)/36165*100),
+                                round(early_perc(2001)/36165*100),
+                                round(early_perc(1994)/36165*100),
+                                round(early_perc(1989)/36165*100) )) +
+  labs(y = expression(Percentage~of~R[S]~from~early~'(%)')) ->
+  panel_b
+
+plot_grid(panel_a, panel_b,
+          ncol = 1,
+          labels = c("a", "b"))
+
+round(early_perc(1990)/36165*100)
+round(early_perc(1994)/36165*100)
+round(early_perc(1999)/36165*100)
+round(early_perc(2004)/36165*100)
+round(early_perc(2005)/36165*100)
+round(early_perc(2006)/36165*100)
+round(early_perc(2009)/36165*100)
+
+```
+
+* We compared mean annual air temperature bwtween 1964 and 2000 (1990s) vs. mean air temperature between 2001 and 2017 (2000s)
+* Air temperature of 1990s (1964-2000) are about 0.5 C lower than that from 2000s(2001-2017)
+* In boreal and polar regions, the temperature difference is bigger (difference ~~ 1 C)
+* Therefore, 1990s are treated as control, 2000s are treated as warming period
 ```{r}
-# Mann-Kendall test for each site and see whether the slope differ from 0
-# longtern_test(longterm)
-# ncol(longterm)
-
-# var_txt <- unlist(
-#   list.files(path = "~/Documents/PNNL/bigdata/UDel/Global2011T_XLS",
-#   pattern = NULL,
-#   all.files = FALSE,
-#   full.names = FALSE,
-#   recursive = TRUE,
-#   ignore.case = FALSE,
-#   include.dirs = FALSE)
-# )
+# temperature of 1990s vs 2010s
+ggplot(PT_Del, aes(Decades,  Tm)) +   
+  geom_boxplot()+
+  facet_wrap(~MiddleClimate, nrow = 2,scales = "free")+ 
+  labs(y=expression("Air temperature "*"("*degree~C*")"))
 ```
+
+```{r, fig.width=8, fig.height=6}
+# temperature annomaly time series
+PT_Del %>% 
+  ggplot(aes(Year, Tm_Annomaly)) +
+  geom_bar(stat = "identity", alpha = 0.85, fill = "white", color = "black") +
+  geom_smooth(color = "red", method = "lm", se = FALSE) +
+  geom_smooth(color = "blue", method = "loess", se = FALSE, linetype = 2) +
+  facet_wrap(~MiddleClimate, nrow = 4, scales = "free") +
+  labs(x = "Year (1961-2014)", 
+       y = expression(T[Air]~anomaly~(degree~C)))
+# ggsave("outputs/FigureSX. T anomaly.jpg", width = 8, height = 6, dpi = 300, units = "in")
+```
+
+
+* We used data from both srdb_v4 and MGRsD 
+* For data from MGRsD, only sites with more than 7 months' Rs measurements were used
+* For each sites, we simulate the ewlationshio between Rs and Tm (air temperature) with Rs=axexp^bxTm
+* According to parameter b, we can calculate Q10=exp(b*10) 
+
+* Q10 does not show a clear trend when changing from warm biome to cold biome (negative relationship between Q10 and annual mean temperature, Space for time)
+* Q10 of 1990s does not signifficantly differ from Q10 of 2010s (Time for warming, panel b and d represent data from srdb_v4 and MGRsD respectively)
+
+* Why we see a clear Q10 decrease as annual temperature decrease, but cannot see the difference between 1990s and 2000s?
+* (1) The temperature change is small, the soil respiration response (Q10) is too small to detect.
+* (2) Hypothesis: some sites Q10 increase, site sites Q10 decrease, depend on ... ...
+* As we seperate by biome region, we do see Q10 increased in arctic and boreal, but no change in other regions.
+
+```{r, fig.width=8, fig.height=6}
+# Q10 of 1990s and 2010s comparison by Biome
+srdb_v4 %>% 
+  filter(Q10_all < 10 & !is.na(Decades) & !is.na(MiddleClimate)) %>% 
+  ggplot(aes(Decades, Q10_all, fill = Decades)) + 
+  geom_jitter( position = position_jitter(0.2), col = 'gray' ) + 
+  geom_violin(draw_quantiles = c(0.25, 0.5, 0.75), alpha = 0.5) +
+  facet_wrap (~MiddleClimate, ncol = 2) +
+  labs(x = "Period", y = expression(Q[10])) +
+  scale_x_discrete(labels=c("1990s" = "1960-2000", "2010s" = "2001-2017")) +
+  theme(legend.position = "none")
+```
+
+```{r, fig.height=6, fig.width=8}
+# srdb Q10 plot
+srdb_v4 %>% 
+  filter(Q10_all < 10 & !is.na(Study_midyear) & !is.na(MiddleClimate)) %>% 
+  dplyr::select(Q10_all, Study_midyear, MiddleClimate) %>% 
+  group_by(Study_midyear, MiddleClimate) %>% 
+  summarise(Q10 = mean(Q10_all), Q10_sd = sd(Q10_all), obs = n()) ->
+  srdb_q10_sum 
+
+# function for lm between Q10 and year
+lm(Q10 ~ Study_midyear, data = subset(srdb_q10_sum, MiddleClimate == "A"), weights = obs) %>% summary()
+lm(Q10 ~ Study_midyear, data = subset(srdb_q10_sum, MiddleClimate == "B"), weights = obs) %>% summary()
+lm(Q10 ~ Study_midyear, data = subset(srdb_q10_sum, MiddleClimate == "Cf"), weights = obs) %>% summary()
+lm(Q10 ~ Study_midyear, data = subset(srdb_q10_sum, MiddleClimate == "Cs"), weights = obs) %>% summary()
+lm(Q10 ~ Study_midyear, data = subset(srdb_q10_sum, MiddleClimate == "Cw"), weights = obs) %>% summary()
+lm(Q10 ~ Study_midyear, data = subset(srdb_q10_sum, MiddleClimate == "Df"), weights = obs) %>% summary()
+lm(Q10 ~ Study_midyear, data = subset(srdb_q10_sum, MiddleClimate == "Dsw"), weights = obs) %>% summary()
+lm(Q10 ~ Study_midyear, data = subset(srdb_q10_sum, MiddleClimate == "E" & Q10 < 7.5 & Study_midyear > 1990), weights = obs) %>% summary()
+
+srdb_q10_sum %>% 
+  ggplot(aes(Study_midyear, Q10)) + 
+  geom_point(aes(size = obs), alpha = 0.5) + 
+  geom_smooth(method = "lm", fill = "skyblue", col = "blue", data = subset(srdb_q10_sum, MiddleClimate %in% c("B", "Cf"))) +
+  geom_smooth(method = "lm", fill = "pink", col = "red", data = subset(srdb_q10_sum, MiddleClimate %in% c("Df", "E"))) +
+  facet_wrap (~MiddleClimate, ncol = 2) +
+  labs(x=expression(Measure~year), y = expression(Q[10])) +
+  labs(size="obs (n)")
+
+```
+
+```{r, fig.height=4, fig.width=8}
+# plot space for time
+plot_grid(
+  srdb_v4_agg %>% 
+    ggplot(aes(MiddleClimate, Q10_mean)) +
+    geom_bar(stat = "identity", col = "black", fill = "white", width = 0.75) +
+    geom_errorbar(aes(ymin=Q10_mean - se, ymax = Q10_mean + se), col = "black", width = 0.05) +
+    coord_cartesian(ylim = c(0, 4.1)) +
+    annotate("text", x = c(1:8), y = 3.75, label = paste0("n=",srdb_v4_agg$obs), angle = 90) +
+    labs(x=expression(Climate~region),
+         y=expression(Q[10])),
+  
+  srdb_v4 %>% 
+    filter(Q10_all < 10 & !is.na(Q10_all) & !is.na(TAnnual_Del)) %>% 
+    dplyr::select(Q10_all, TAnnual_Del) %>% 
+    mutate(TAnnual_Del = round(TAnnual_Del*8)/8) %>% 
+    group_by(TAnnual_Del) %>% 
+    summarise(Q10_all = mean(Q10_all),
+              obs = n()) %>% 
+    ggplot(aes(TAnnual_Del, Q10_all, size = obs)) +
+    geom_point(alpha = 0.5) +
+    geom_smooth(method = "lm", show.legend = FALSE) +
+    coord_cartesian(ylim = c(0, 7.5)) + 
+    labs(x=expression(Annual~mean~air~temperature~(degree~C)),
+         y=expression(Q[10])) +
+    theme(legend.position = c(0.75, 0.8))
+)
+
+```
+
+```{r, fig.width=8, fig.height=6}
+srdb_v4 %>% 
+  filter(Q10_all < 10 & !is.na(Q10_all) & !is.na(PAnnual_Del) & !is.na(MiddleClimate)) %>% 
+  dplyr::select(Q10_all, PAnnual_Del, MiddleClimate) %>% 
+  mutate(PAnnual_Del = round(PAnnual_Del*8)/8) %>% 
+  group_by(PAnnual_Del, MiddleClimate) %>% 
+  summarise(Q10_all = mean(Q10_all),
+            obs = n()) ->
+  srdb_q10_map_sum
+
+# function for lm between Q10 and year
+lm(Q10_all ~ PAnnual_Del, data = subset(srdb_q10_map_sum, MiddleClimate == "A"), weights = obs) %>% summary()
+lm(Q10_all ~ PAnnual_Del, data = subset(srdb_q10_map_sum, MiddleClimate == "B"), weights = obs) %>% summary()
+lm(Q10_all ~ PAnnual_Del, data = subset(srdb_q10_map_sum, MiddleClimate == "Cf"), weights = obs) %>% summary()
+lm(Q10_all ~ PAnnual_Del, data = subset(srdb_q10_map_sum, MiddleClimate == "Cs"), weights = obs) %>% summary()
+lm(Q10_all ~ PAnnual_Del, data = subset(srdb_q10_map_sum, MiddleClimate == "Cw"), weights = obs) %>% summary()
+lm(Q10_all ~ PAnnual_Del, data = subset(srdb_q10_map_sum, MiddleClimate == "Df"), weights = obs) %>% summary()
+lm(Q10_all ~ PAnnual_Del, data = subset(srdb_q10_map_sum, MiddleClimate == "Dsw"), weights = obs) %>% summary()
+lm(Q10_all ~ PAnnual_Del, data = subset(srdb_q10_map_sum, MiddleClimate == "E"), weights = obs) %>% summary()
+
+srdb_q10_map_sum %>% 
+  ggplot(aes(PAnnual_Del, Q10_all, size = obs)) +
+  geom_point(alpha = 0.5) +
+  geom_smooth(method = "lm", fill = "skyblue", col = "blue", data = subset(srdb_q10_map_sum, MiddleClimate %in% c("Cf")), show.legend = FALSE) +
+  geom_smooth(method = "lm", fill = "pink", col = "red", data = subset(srdb_q10_map_sum, MiddleClimate %in% c("Cs", "Dsw")), show.legend = FALSE) +
+  coord_cartesian(ylim = c(0, 7.5)) + 
+  labs(x=expression(Annual~precipitation~(mm)),
+       y=expression(Q[10])) +
+  facet_wrap(~MiddleClimate, ncol = 2)
+```
+
+
+## MLR of MGRsD
+```{r, include=FALSE}
+# biome_MLR_srdb (srdb_v4)
+outputs <- biome_MLR_MGRsD_weight (MGRsD, 1990)
+for (i in 1991:2009){
+  outputs <- bind_rows(outputs, biome_MLR_MGRsD_weight (MGRsD, i))
+  print(paste0("*****", i))
+} 
+```
+
+## plot out the reuslts
+
+```{r, fig.height = 4, fig.width = 6}
+bind_rows(
+  outputs %>% mutate(data = "(a) all data"),
+  outputs %>% 
+    filter(p_inter <= 0.05, p_tm <= 0.05) %>% 
+    filter(Q10_CT >= 1 & Q10_WM >= 1) %>% 
+    mutate(data = "(b) p < 0.05")) %>% 
+  mutate(Q10_dif = Q10_WM - Q10_CT) %>% 
+  ggplot(aes(Biome, Q10_dif)) +
+  geom_hline(yintercept = 0, linetype = 2, col = "red") + 
+  # geom_violin(draw_quantiles = c(0.25, 0.5, 0.75)) +
+  geom_boxplot(outlier.size = 2, outlier.shape = 16,
+               lwd = 0.5, width = 0.5, alpha=1, fatten = NULL,
+               fill = "orange", col = "orange") +
+  stat_summary(fun.y=mean, geom="point", shape=16, size=4.5, col = "gray") +
+  stat_summary(fun.y=mean, geom="point", shape=16, size=1.5, col = "white") +
+  labs(y = expression(Q[10]~(later)~"-"~Q[10]~(early))) +
+  facet_grid(cols = vars(data)) 
+```
+
+
+
+```{r, fig.height = 6, fig.width = 8}
+bind_rows(
+  outputs %>% mutate(data = "(a) all data"),
+  outputs %>% 
+    filter(p_inter <= 0.05, p_tm <= 0.05) %>% 
+    filter(Q10_CT >= 1 & Q10_WM >= 1) %>% 
+    mutate(data = "(b) p < 0.05")) %>% 
+  mutate(Q10_dif = Q10_WM - Q10_CT) %>% 
+  ggplot(aes(Biome, Q10_dif, fill = Biome)) +
+  geom_hline(yintercept = 0, linetype = 2, col = "red") + 
+  # geom_violin(draw_quantiles = c(0.25, 0.5, 0.75)) +
+  geom_boxplot(outlier.size = 2, outlier.shape = 16,
+               lwd = 0.5, width = 0.25, alpha=0.1) +
+  labs(y = expression(Q[10]~(later)~"-"~Q[10]~(early))) +
+  facet_grid(rows = vars(data)) +
+  scale_fill_discrete(labels = c("A-Tropic", "B-Arid", "Cf-Temperate humid", "Cs-Temperate summer dry",
+                                 "Cw-Temperature winter dry", "Df-Boreal humid", "Dsw-Boreal dry", "E-Arctic"))
+
+outputs %>% 
+  filter(Biome %in% c("Dsw") & Q10_WM > Q10_CT) 
+
+outputs %>% 
+  filter(Biome %in% c("A")) 
+
+# prepare Table S1
+MGRsD$Decades <- ifelse (MGRsD$Meas_Year <= 2005, 'Early', 'Later')
+
+bind_rows(
+  outputs %>% 
+    filter(B_YR == 2005),
+  biome_MLR_MGRsD_all(MGRsD)
+)
+
+
+```
+
+
+* Using SRDB_V4 (Q10 from soil temperature, Q10 are directly collected from publication)
+```{r Q10 test, fig.height=6, fig.width=8}
+# compare Q10 of 1961-1990 (30 years) vs 1991-2014
+# colnames(srdb_v4)
+Q10_1 <- Q10_early_late (srdb_v4, 'Q10_0_10', ' A (0-10 cm) ')
+Q10_2 <- Q10_early_late (srdb_v4, 'Q10_5_15', ' B (5-15 cm) ')
+Q10_3 <- Q10_early_late (srdb_v4, 'Q10_10_20', ' C (10-20 cm) ')
+Q10_4 <- Q10_early_late (srdb_v4, 'Q10_0_20', ' D (0-20 cm) ')
+
+plot_grid (Q10_1, Q10_2, Q10_3, Q10_4, ncol = 2)  
+
+Q10_early_late (srdb_v4, 'Q10_all', 'All') %>% 
+  print()
+
+# bootstrap and compare mean Q10
+set.seed(20200610)
+RESAMPLE <- function(n, x) { # no errors/sd inputs
+  mean(sample(x, n, replace = TRUE))
+}
+
+srdb_v4 %>% 
+  mutate(Q10_0_20 = coalesce(Q10_0_10, Q10_0_20),
+         Q10_other = coalesce(Q10_5_15, Q10_10_20, Q10_other1, Q10_other2)) %>% 
+  dplyr::select(Decades, Q10_0_20, Q10_other) %>% 
+  tidyr::gather(-Decades, key = "Depth", value = "Q10") %>% 
+  filter(!is.na(Q10)) ->
+  Q10_decades
+
+Q10_decades %>% 
+  filter(Decades == "1990s" & Depth == "Q10_0_20") ->
+  Q10_1990s_0_20
+
+Q10_decades %>% 
+  filter(Decades == "2010s" & Depth == "Q10_0_20") ->
+  Q10_2010s_0_20
+
+Q10_decades %>% 
+  filter(Decades == "1990s" & Depth == "Q10_other") ->
+  Q10_1990s_other
+
+Q10_decades %>% 
+  filter(Decades == "1990s" & Depth == "Q10_other") ->
+  Q10_2010s_other
+  
+bootstrap_Q10_period <- tibble(
+  Q10_0_20_early = sapply(rep(20, 5000), RESAMPLE, Q10_1990s_0_20$Q10),
+  Q10_0_20_later = sapply(rep(20, 5000), RESAMPLE, Q10_2010s_0_20$Q10),
+  Q10_other_early = sapply(rep(20, 5000), RESAMPLE, Q10_1990s_other$Q10),
+  Q10_other_later = sapply(rep(20, 5000), RESAMPLE, Q10_2010s_other$Q10)
+)
+
+bootstrap_Q10_period %>%
+  tidyr::gather(key = "Group", value = "Q10") %>% 
+  ggplot(aes(Q10, fill = Group)) +
+  # theme_cowplot() +
+  geom_density(stat = "density", alpha = 0.65) +
+  theme(legend.position = c(0.80, 0.75)) 
+```
+
+```{r R10 test}
+# test Q10 under Ra and Rh dominant sites
+R10_early_late (srdb_v4, 'R10', 'Test R10 for early and late years')
+```
+
+
+* Using SPI to detect temporal trend of precipitation?
+* And then see whether Q10 values have relationship with SPI trend?
+* Q10 vs SPI tau values ?
+* First, need get global MK test and get tau value for each site
+* Second, see how Q10 differ among different tau range () ?
+
+
+```{r, fig.height=8, fig.width=8}
+MGRsD %>% 
+  mutate(Tm_de = round(Tm_del*8)/8) %>%
+  mutate(Period = case_when(
+    Meas_Year <= 2005 ~ "Early",
+    TRUE ~ "Later" )) %>% 
+  dplyr::select(Tm_del, RsLog, MiddleClimate, Period) %>% 
+  group_by(MiddleClimate, Period, Tm_del) %>% 
+  summarise(RsLog = mean(RsLog),
+            obs = n()) ->
+  MGRsD_sum
+
+MGRsD_sum$obs <- ifelse(MGRsD_sum$obs >= 100, 100, MGRsD_sum$obs)
+
+MGRsD_sum %>% 
+  ggplot (aes(Tm_del, RsLog, colour = Period)) +
+  geom_point(aes(size = obs), alpha = 0.15) + 
+  geom_smooth(method = 'lm') +
+  facet_wrap(~MiddleClimate, ncol = 2) + 
+  labs( y = expression(R[S]~","~log~(g~C~m^{-2}~day^{-1}) ),
+        x = expression(Air~temperature~(degree~C) ) ) +
+  theme(legend.position = 'top')
+  
+# ggsave("outputs/FigureX. MGRsD_1990svs2000s.jpg", width = 8, height = 8, dpi = 300, units = "in")
+```
+
+## Using srdb data
+```{r}
+srdb_biome_comparisom (srdb_v4)
+```
+
+
+* **Minutes to hours to days**: how frequently do we need to sample? Uses GCREW continuous data. How frequently do we need to sample?
+* **Days to months**: how frequently do we need to sample for annual flux? Uses SERC survey data.
+* **Years**: how much coverage is needed for robust annual estimate? This uses `Annual_coverage` field of SRDB. Not clear about this one.
+* **Error introduced by RH versus RS**. Uses SRDB. Not sure about this. Hard.
+* - our Nature anlysis assumed no measurement error. How could this be estimated?
+* Random measurement error: "Random errors show up as different results for ostensibly the same repeated measurement. They can be estimated by comparing multiple measurements, and reduced by averaging multiple measurements." https://en.wikipedia.org/wiki/Observational_error#Random_errors_versus_systematic_errors
+* - _continuous_ data: variability between measurement 1 and measurement 2
+* - _survey_ (discontinuous) data: variability between m1 and m2 PLUS sampling error (sampling from continuous annual data)
+* **Years to decades**: how well can we detect trends? This is Nature paper SI work.
+
+### What's the SRDB interannual variability?
+```{r srdb, echo=FALSE}
+srdb_v5$Rs_interann_cv <- with(srdb_v5, Rs_interann_err / Rs_annual)
+median_interann_cv <- median(srdb_v5$Rs_interann_cv, na.rm = TRUE)
+
+srdb_v5 %>% 
+  filter(!is.na(Rs_interann_cv)) %>% 
+  ggplot(aes(x = Rs_interann_cv)) + 
+  geom_histogram(bins = 30, fill = 'gray', col = "black") +
+  scale_x_continuous(labels = scales::percent, limits = c(0, 1)) +
+  geom_vline(xintercept = median_interann_cv, color = "red") +
+  ylab("Count") + 
+  xlab("CV between successive years") ->
+  plot_annual_cv
+  
+# save_agu_plot("srdb_cv.png")
+
+# Site records
+srdb_v5 %>% 
+  filter(!is.na(Longitude), !is.na(Rs_annual), Manipulation == "None") %>% 
+  mutate(lon = round(Longitude, 2), lat = round(Latitude, 2)) ->
+  srdb
+
+# Site records
+srdb %>% 
+  filter(!is.na(Longitude), !is.na(Rs_annual), Manipulation == "None") %>% 
+  mutate(lon = round(Longitude, 2), lat = round(Latitude, 2)) %>% 
+  # Compute the longest records
+  group_by(lon, lat, Leaf_habit, Ecosystem_type) %>% 
+  summarise(Years = length(unique(Study_midyear))) %>% ungroup %>% 
+  arrange(desc(Years)) %>% 
+  top_n(10) %>% 
+  left_join(dplyr::select(srdb, Site_name, lon, lat, Ecosystem_type, Study_midyear, YearsOfData),
+            by = c("lon", "lat", "Ecosystem_type")) %>% 
+  mutate(Site_name = substr(Site_name, 1, 10)) ->
+  site_smry
+
+ggplot(site_smry, aes(Study_midyear, Site_name, 
+                      color = paste(Leaf_habit, Ecosystem_type))) + 
+  geom_point() + xlab("Year") + ylab("") + scale_color_discrete("")
+# save_agu_plot("site_records.png", width = 8, height = 4)
+```
+
+### What's the CV between survey measurements 1 and 2?
+
+```{r cv12, echo = FALSE}
+cosore_all %>% 
+  mutate(ID_day = paste0(dset, "-", CSR_PORT, "-", year(CSR_TIMESTAMP_END),"-", month(CSR_TIMESTAMP_END), "-", day(CSR_TIMESTAMP_END))) %>% 
+  group_by(ID_day) %>%
+  summarise(n = n(), meanFlux = mean(CSR_FLUX_CO2), cv = sd(CSR_FLUX_CO2) / mean(CSR_FLUX_CO2)) %>% 
+  filter(n >= 2) ->
+  meas_error_1
+median_error <- median(meas_error_1$cv)
+
+ggplot(meas_error_1, aes(x = cv)) + 
+  geom_histogram(bins = 30, fill = "gray", col = "black") +
+  scale_x_continuous(labels = scales::percent, limits = c(-0.1, 1)) +
+  geom_vline(xintercept = median_error, color = "red") +
+  ylab("Count") + 
+  xlab("CV between successive IRGA measurements") ->
+  plot_IRGA_cv
+# save_agu_plot("licor12_cv.png")
+```
+
+OK, so the median measurement error here is ~`r round(median_error * 100, 0)`% for `r nrow(meas_error_1)` observations of fluxes between `r round(min(meas_error_1$meanFlux), 2)` and `r round(max(meas_error_1$meanFlux), 2)` µmol/m2/s.
+
+### Nature paper analysis
+```{r hashimoto, echo=FALSE}
+library(ncdf4)
+# Downloaded August 25, 2017 from http://cse.ffpri.affrc.go.jp/shojih/data/index.html
+ncfiles <- c("~/Data/Hashimoto/RH_yr_Hashimoto2015.nc",
+             "~/Data/Hashimoto/RS_yr_Hashimoto2015.nc")
+
+nc <- nc_open(ncfiles[1])
+# These annual data start in 1901; extract 1990-2012
+co2 <- ncvar_get(nc, "co2", start = c(1, 1, 1, 90), count = c(-1, -1, 1, 23))
+nc_close(nc)
+
+
+png(file.path(plot_dir, "co2.png"))
+lattice::levelplot(co2[,,1])
+dev.off()
+
+co2 <- co2[400:600, 220:360,]  # punch a hole for testing: North America
+#co2 <- co2[500:540, 320:360,]  # punch a hole for testing: part of North America
+
+do_fitting <- function(co2) {
+  
+  f <- function(rh) { 
+    df <- data.frame(x = seq_along(rh), y = rh)
+    tryCatch(lm(y ~ x, data = df), error = function(e) NA)
+  }
+  
+  # Fit linear model to each grid cell (this is slow)
+  mods <- apply(co2, c(1, 2), FUN = f)  # slow
+  
+  # Extract slopes
+  slopes <- apply(mods, c(1, 2), FUN = function(x) 
+    if(!is.na(x)) x[[1]]$coefficients[["x"]] else NA)
+  slopes <- matrix(slopes, nrow = nrow(mods), ncol = ncol(mods))
+  
+  # Extract slope p-values
+  signif <- apply(mods, c(1, 2), FUN = function(x) 
+    if(!is.na(x)) summary(x[[1]])$coefficients["x", "Pr(>|t|)"] else NA)
+  signif <- matrix(signif, nrow = nrow(mods), ncol = ncol(mods))
+  
+  return(list(slopes = slopes, signif = signif))
+}
+
+out <- do_fitting(co2)
+summary(as.vector(out$slopes))
+
+png(file.path(plot_dir, "co2-slopes.png"))
+lattice::levelplot(out$slopes > 0)
+dev.off()
+png(file.path(plot_dir, "co2-signif.png"))
+lattice::levelplot(out$signif < 0.05)
+dev.off()
+
+ncells <- sum(!is.na(out$slopes))
+pos_slope <- sum(out$slopes > 0, na.rm = TRUE)
+signif_pos_slope <- sum(out$slopes > 0 & out$signif < 0.05, na.rm = TRUE)
+
+lat_weight <- abs(cos(seq(-pi/2, pi/2, length.out = nrow(out$slopes))))
+ncells_areawt <- sum(lat_weight * ncol(out$slopes))
+pos_slope_areawt <- sum(out$slopes > 0 * lat_weight, na.rm = TRUE)
+signif_pos_slope_areawt <- sum(out$slopes > 0 & out$signif < 0.05 * lat_weight, na.rm = TRUE)
+
+# plot histgram
+tibble(signif = as.vector(unlist(out$signif))) %>% 
+  na.omit() %>% 
+  ggplot(aes(x = signif)) + 
+  geom_histogram(bins = 30, fill = "gray", col = "black") +
+  # geom_vline(xintercept = 0.05, color = "red") +
+  ylab("Count") + 
+  xlab("p value of time series trend") ->
+  plot_signif_before
+```
+
+Total cells = `r ncells`.
+
+Cells with positive slope = `r pos_slope` or `r round(pos_slope / ncells * 100, 0)`%.
+
+Cells with _significant_ positive slope = `r signif_pos_slope` or `r round(signif_pos_slope / ncells * 100, 0)`%.
+
+Area with positive slope = `r round(pos_slope_areawt / ncells_areawt * 100, 0)`%.
+
+Area with _significant_ positive slope = `r round(signif_pos_slope_areawt / ncells_areawt * 100, 0)`%.
+
+### Re-do analysis with assumed error rate
+```{r fuzz, echo=FALSE}
+
+co2_fuzz <- fuzz(co2, error = median_error)
+out_fuzz <- do_fitting(co2_fuzz)
+
+png(file.path(plot_dir, "co2-fuzz-slopes.png"))
+lattice::levelplot(out_fuzz$slopes > 0)
+dev.off()
+png(file.path(plot_dir, "co2-fuzz-signif.png"))
+lattice::levelplot(out_fuzz$signif < 0.05)
+dev.off()
+
+# plot histgram after cv added
+tibble(signif = as.vector(unlist(out_fuzz$signif))) %>% 
+  na.omit() %>% 
+  ggplot(aes(x = signif)) + 
+  geom_histogram(bins = 30, fill = "gray", col = "black") +
+  # geom_vline(xintercept = 0.05, color = "red") +
+  ylab("Count") + 
+  xlab("p value of time series trend") ->
+  plot_signif_after
+
+ncells <- sum(!is.na(out_fuzz$slopes))
+pos_slope <- sum(out_fuzz$slopes > 0, na.rm = TRUE)
+signif_pos_slope <- sum(out_fuzz$slopes > 0 & out_fuzz$signif < 0.05, na.rm = TRUE)
+
+lat_weight <- abs(cos(seq(-pi/2, pi/2, length.out_fuzz = nrow(out_fuzz$slopes))))
+ncells_areawt <- sum(lat_weight * ncol(out_fuzz$slopes))
+pos_slope_areawt <- sum(out_fuzz$slopes > 0 * lat_weight, na.rm = TRUE)
+signif_pos_slope_areawt <- sum(out_fuzz$slopes > 0 & out_fuzz$signif < 0.05 * lat_weight, na.rm = TRUE)
+
+# Convert to a data frame for ggplot2 plotting
+ro = nrow(co2_fuzz)
+co = ncol(co2_fuzz)
+yr = dim(co2_fuzz)[3]
+co2_fuzz_df <- tibble(
+  flux = as.vector(co2_fuzz),
+  lat = rep(seq_len(ro), times = co * yr),
+  lon = rep(rep(seq_len(co), each = ro), times = yr),
+  year = rep(seq_len(yr), each = ro * co),
+  p = rep(as.vector(out_fuzz$signif), times = yr)
+)
+
+co2_fuzz_df %>% 
+  filter(!is.na(p)) %>% 
+  # pick a subset of grid cells for a readable plot
+  distinct(lon, lat) %>% 
+  sample_n(250) %>% 
+  left_join(co2_fuzz_df, by = c("lon", "lat")) ->
+  co2_fuzz_subsampled
+
+co2_fuzz_subsampled %>% 
+  ggplot(aes(year + 1990, flux, group = paste(lat, lon))) + 
+  geom_line(color = "lightgrey") +
+  xlab("Year") + ylab(expression(R[S]~(g~C~m^{-2}~yr^{-1}))) +
+  geom_line(data = filter(co2_fuzz_subsampled, p < 0.05), color = "red", alpha = I(0.5)) ->
+  fuzz_time_series
+# save_agu_plot("fuzz_over_time.png")
+```
+
+Cells with _significant_ positive slope (observations with `r round(median_error * 100, 0)`% measurement error) = `r signif_pos_slope` or `r round(signif_pos_slope / ncells * 100, 0)`%.
+
+Area with _significant_ positive slope = `r round(signif_pos_slope_areawt / ncells_areawt * 100, 0)`%.
+
+
+# Next steps
+
+Next: make a nice graph of change over time 
+using a subset of data for readability
+Convert array to data frame and plot rs versus time
+with a line for each grid cell
+
+# Simple: when would expect to see significance?
+
+* We'd like to do this once for perfect data
+* Once for data + interannual variability
+* Once for data + iav + observational error
+
+```{r simple, echo=FALSE}
+set.seed(1234)
+
+trend_emergence <- function(rd, theilsen = F) {
+  Year <- seq_len(length(rd))
+  trend_p <- rep(NA, length(rd))
+  for(i in seq_along(trend_p)) {
+    if(i > 2) {
+      if(theilsen) {
+        df <- tibble(Year = Year[1:i], rd = rd[1:i])
+        suppressWarnings(m <- mblm::mblm(rd ~ Year, data = df))  # mblm doesn't like form below
+      } else {
+        m <- suppressWarnings(lm(rd[1:i] ~ Year[1:i]))
+      }
+      # Extract 2nd row (Year) and 4th column (Pr>[t] or Pr>|V|)
+      trend_p[i] <- summary(m)$coefficients[2, 4]
+    }
+  }
+  trend_p
+}
+
+
+# Temperature has risen 0.9 C in 40 years, more or less
+dTdt <- round(0.9 / 40.0, 3)
+q10 <- 2
+R0 = 1.0
+respdata <- tibble(Year = 1:100,
+                   Temp = dTdt * Year,
+                   Resp = R0 * q10 ^ (Temp / 10),
+                   # This is interannual variability
+                   Resp_iav = fuzz(Resp, 0.098),  # this is SRDB Rs_interannual_err
+                   Resp_fuzz = fuzz(Resp_iav, median_error))
+
+# Make a nice plot--first with ideal curve, then IAV, then observations
+p <- ggplot(respdata, aes(Year, Resp)) + 
+  geom_point(color = "grey") + 
+  ylab("Respiration") + coord_cartesian(ylim = c(0.75, 1.5)) + 
+  annotate("text", 10, 1.4, label = paste("Q10 =", q10)) + 
+  annotate("text", 10, 1.3, label = paste("dT/dt =", dTdt))
+save_agu_plot("01.png")
+p <- p + geom_point(aes(y = Resp_iav))
+save_agu_plot("02.png")
+p <- p + geom_errorbar(aes(ymin = Resp_iav - Resp_iav * median_error,
+                           ymax = Resp_iav + Resp_iav * median_error))
+save_agu_plot("03.png")
+
+save_agu_plot("04.png",
+              p + geom_line(aes(y = Resp), color = "red", size = 2))
+
+save_agu_plot("05.png",
+              p + geom_line(aes(y = Resp), color = "pink", size = 2) +
+                geom_line(aes(y = Resp_iav), color = "red", size = 2))
+
+save_agu_plot("06.png",
+              p + geom_line(aes(y = Resp), color = "pink", size = 2) +
+                geom_line(aes(y = Resp_iav), color = "pink", size = 2) +
+                geom_line(aes(y = Resp_fuzz), color = "red", size = 2))
+
+
+do_sim <- function(i, respdata, error = 0.0) {
+  # This is observational error
+  respdata$Resp_fuzz <- fuzz(respdata$Resp_iav, error)
+  respdata$trend_p <- trend_emergence(respdata$Resp_fuzz)
+  respdata
+}
+
+results <- list()
+library(parallel)
+n_sims <- 100
+results <- mclapply(seq_len(n_sims), do_sim, respdata, error = median_error)
+
+results %>% 
+  bind_rows %>% 
+  group_by(Year) %>% 
+  summarise(n = n(), 
+            Temp = mean(Temp), 
+            Resp = mean(Resp),
+            Resp_iav_sd = sd(Resp_iav),
+            Resp_iav = mean(Resp_iav),
+            Resp_fuzz_sd = sd(Resp_fuzz),          
+            Resp_fuzz = mean(Resp_fuzz), 
+            trend_p_sd = sd(trend_p), 
+            trend_p = mean(trend_p)) %>% 
+  filter(!is.na(trend_p)) ->
+  results_summary
+
+p <- ggplot(results_summary, aes(Year, trend_p, color = trend_p < 0.05)) +
+  geom_point() +
+  geom_line(aes(y = Resp_fuzz)) +
+  geom_line(aes(y = Resp), color = "grey") +
+  geom_ribbon(aes(ymin = Resp_fuzz - Resp_fuzz_sd, 
+                  ymax = Resp_fuzz + Resp_fuzz_sd, 
+                  fill = trend_p < 0.05), color = NA, alpha = I(0.35)) +
+  guides(color = FALSE, fill = FALSE) +
+  annotate("text", 10, 1.5, label = paste("N =", n_sims)) +
+  ylab("Theil-sen p-value   ///   Respiration")
+print(p)
+# save_agu_plot("simple_sim.png")
+```
+
+```{r, fig.height=8, fig.width=8}
+# put figures together
+plot_grid(fuzz_time_series, p,
+          ncol = 1,
+          labels = c("a", "b"))
+```
+
+```{r, fig.height=8, fig.width=8}
+plot_grid(plot_IRGA_cv, plot_annual_cv) ->
+  plot_cv
+# put figures together
+plot_grid(plot_signif_before, plot_cv, plot_signif_after,
+          ncol = 1,
+          labels = c("a", "b", "c"))
+```
+
+```{r}
+cosore_q10 %>% 
+  dplyr::select(R2_day) %>% 
+  na.omit() %>% 
+  ggplot(aes(x = R2_day)) + 
+  geom_histogram(bins = 30, fill = "gray", col = "black")
+
+cosore_q10 %>% 
+  dplyr::select(R2_night) %>% 
+  na.omit() %>% 
+  ggplot(aes(x = R2_night)) + 
+  geom_histogram(bins = 30, fill = "gray", col = "black")
+
+cosore_q10 %>% 
+  dplyr::select(R2_day) %>% 
+  na.omit() %>% 
+  filter(R2_day > 0.5)
+```
+
+We then analyzed the trend of annual RS time series for all grid cells (n=`r ncells`). The results tuen out that about `r signif_pos_slope`% cells (Figure S7, panel a) showed a significant (p<0.05) possitive trend. However, in the field experiment, measurement error should be considered. We obtained the annual RS interannual variability from the newest version of global soil respiration database (SRDB-V5). In addition, we obtained the instantaneous RS flux measurement variability from a community database for continuous soil respiration and other soil-atmosphere greenhouse gas flux data (COSORE23). The results show that RS interannual variability is about `r round(median_interann_cv,2)*100`% of annual RS, and instantaneous RS flux measurement variability is about `r round(median_error, 2)*100`% of measurement mean (Figure S7, panel b). When RS measurement variability was considered, only ~`r round (signif_pos_slope / ncells * 100, 0)`% (Figure S7, panel c) of cells showed a significant increase trend.
+
+```{r}
+MGRsD %>% 
+  select(Study_number, Site_ID, Meas_Year) %>% 
+  group_by(Study_number, Site_ID) %>% 
+  count(Meas_Year) %>% 
+  group_by(Study_number, Site_ID) %>% 
+  summarise(n_year = n()) %>% 
+  arrange(desc(n_year))
+```
+
+
+
+
