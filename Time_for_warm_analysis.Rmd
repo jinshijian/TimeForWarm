@@ -299,16 +299,18 @@ early_perc <- function(var_year) {
 MGRsD %>% 
   select(Meas_Year, Rs_Norm) %>% 
   na.omit() %>% 
-  # group_by(Meas_Year) %>% 
-  # summarise(obs = n(), Rs_mean = mean(Rs_Norm), Rs_sd = sd(Rs_Norm)) %>% 
+  # group_by(Meas_Year) %>%
+  # summarise(obs = n(), Rs_mean = mean(Rs_Norm), Rs_sd = sd(Rs_Norm)) %>%
+  # mutate(obs2 = ifelse(obs >= 500, 500, obs)) %>% 
   ggplot(aes(x = Meas_Year, y = Rs_Norm)) +
-  geom_hex(col = "gray", bins = 35) +
+  geom_jitter(alpha = 0.25, shape = '.', size = 1) +
   scale_fill_distiller(palette = "YlGnBu", name = "Count", direction = -1) +
   scale_x_continuous(breaks=seq(1960, 2017, 10)) +
+  scale_size_continuous(name = "Obs (n)") +
   theme(axis.title.x = element_blank(),
         panel.grid.major = element_blank(),
         panel.grid.minor = element_blank(),
-        legend.position = c(0.25, 0.70)) +
+        legend.position = "top") +
   labs(y = expression(R[S]~(g~C~m^{-2}~day^{-1}))) ->
   panel_a
 
@@ -536,7 +538,7 @@ bind_rows(
                lwd = 0.5, width = 0.5, alpha=1, fatten = NULL,
                fill = "orange", col = "orange") +
   stat_summary(fun.y=mean, geom="point", shape=16, size=4.5, col = "gray") +
-  stat_summary(fun.y=mean, geom="point", shape=16, size=1.5, col = "white") +
+  stat_summary(fun.y=mean, geom="point", shape=16, size=1.5, col = "black") +
   labs(y = expression(Q[10]~(later)~"-"~Q[10]~(early))) +
   facet_grid(cols = vars(data)) 
 ```
